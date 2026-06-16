@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ycruncher-monitor</AssemblyName>
+    <RootNamespace>Rynez</RootNamespace>
+    <Product>Rynez Stability Monitor</Product>
+    <AssemblyTitle>Rynez Stability Monitor</AssemblyTitle>
+    <Company>Rynez Stability Monitor</Company>
+    <!-- Request administrator privileges (needed for affinity / monitor reliability) -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+</Project>

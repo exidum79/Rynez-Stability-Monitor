@@ -1,0 +1,25 @@
+# Build output
+**/bin/
+**/obj/
+
+# Distribution payload (built locally; not tracked)
+dist/ycruncher-monitor.exe
+dist/ycruncher-monitor.pdb
+
+# Runtime logs / breadcrumb
+dist/logs/
+*.csv
+lastalive.txt
+yc_stress.log
+
+# Third-party engine (download separately, see README) - keep the placeholder
+dist/tools/*
+!dist/tools/README.md
+
+# Internal planning notes
+모니터_개발계획서.md
+
+# OS / editor cruft
+Thumbs.db
+.vs/
+*.user
