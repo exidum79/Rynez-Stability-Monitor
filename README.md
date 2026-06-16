@@ -1,5 +1,12 @@
 # Rynez Stability Monitor
 
+[![Download](https://img.shields.io/github/v/release/exidum79/Rynez-Stability-Monitor?label=Download&logo=github&sort=semver)](https://github.com/exidum79/Rynez-Stability-Monitor/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/exidum79/Rynez-Stability-Monitor/total?logo=github)](https://github.com/exidum79/Rynez-Stability-Monitor/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue)](#requirements)
+
+> **▶ [Download the latest build (ready-to-run .exe, no .NET install needed)](https://github.com/exidum79/Rynez-Stability-Monitor/releases/latest)** — then drop in your own y-cruncher (see [Setup](#y-cruncher-is-not-included)).
+
 A small, focused Windows tool for **diagnosing which CPU core is unstable** when
 you are tuning an AMD Ryzen with **Curve Optimizer / PBO** (and similar
 overclock / undervolt setups).
