@@ -106,11 +106,21 @@ public sealed class YCruncherRunner
             // process), so neither its CPU time nor the log file grow reliably. y-cruncher's own -TL time
             // limit bounds the run; a real machine freeze is caught by the crash breadcrumb after reboot.
             // We just scan the log for a real error and watch for an early/abnormal exit.
+            double lastBeat = 0;
             while (!proc.HasExited)
             {
                 if (token.IsCancellationRequested) { TryKill(proc); return new(YcOutcome.Cancelled, "", -1); }
                 var (_, errLine) = ScanLog(logPath);
                 if (errLine != null) { TryKill(proc); return Error(errLine, logPath); }
+                // Heartbeat so a multi-minute run doesn't look frozen (the console is otherwise silent
+                // until error/completion, and y-cruncher.exe itself sits at ~0% - its child does the work).
+                double el = runSw.Elapsed.TotalSeconds;
+                if (el - lastBeat >= 15)
+                {
+                    lastBeat = el;
+                    string? prog = LatestProgress(logPath);
+                    Console.WriteLine($"      ... running {el:F0}s / ~{totalLimit}s{(prog != null ? " | " + prog : "")}");
+                }
                 proc.WaitForExit(500);
             }
 
@@ -141,6 +151,26 @@ public sealed class YCruncherRunner
                 core = _coreOfLogical(logical);
 
         return new(YcOutcome.ErrorDetected, detail, core);
+    }
+
+    // Pull the most recent progress line from y-cruncher's log (proof the worker child is alive).
+    private static string? LatestProgress(string path)
+    {
+        try
+        {
+            string tail = ReadTail(path, 12);
+            string? best = null;
+            foreach (var raw in tail.Split('\n'))
+            {
+                string l = raw.Trim();
+                if (l.Contains("Elapsed Time", StringComparison.OrdinalIgnoreCase)
+                    || l.StartsWith("Testing", StringComparison.OrdinalIgnoreCase)
+                    || l.StartsWith("Iteration", StringComparison.OrdinalIgnoreCase))
+                    best = l;
+            }
+            return best;
+        }
+        catch { return null; }
     }
 
     private static string ReadTail(string path, int lines)

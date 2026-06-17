@@ -328,6 +328,21 @@ CO at high frequency), `FFTv4` is the heaviest AVX-512 (→ max current/heat, lo
 Vdroop), `N63` is an NTT integer path (→ silent errors FFT misses), `VT3` is
 memory-coupled. Valid tokens: `BKT BBP SFTv4 SNT SVT FFTv4 NTT63 N63 VSTv3 VT3`.
 
+### "It printed the start line then nothing happens / y-cruncher.exe is at 0%"
+
+That is normal — it is almost certainly **running**, not stuck:
+
+- **`y-cruncher.exe` is only a launcher** and correctly sits at **~0%**. The real load runs
+  in a **child process** named for your CPU (e.g. `24-ZN5 ~ Komari.exe` on Zen 5). Look for
+  *that* process in Task Manager → **Details** — it should be pegging the cores.
+- Each run is **silent except a progress tick every ~15 s**; a full all-core pass is a few
+  minutes (default `4 tests × 60 s = ~240 s`). Wait for the ticks / the result.
+- Sanity-check `…/tools/yc_stress.log` — if `Iteration … Total Elapsed Time` keeps growing,
+  it is working.
+- If the child worker never appears, you likely extracted **only `y-cruncher.exe`**. Extract
+  the **whole** y-cruncher folder so `tools\Binaries\` (the per-architecture worker `.exe`s)
+  is present.
+
 ### How long to run
 
 Curve Optimizer instability is **intermittent**, so run time matters — but the

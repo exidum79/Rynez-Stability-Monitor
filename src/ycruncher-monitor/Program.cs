@@ -281,6 +281,8 @@ void PollWhea()
 }
 
 Console.WriteLine($"Starting (Ctrl+C to stop)...");
+Console.WriteLine("(Note: y-cruncher.exe shows ~0% in Task Manager - its child process (e.g. \"24-ZN5 ~ ...exe\") does the work.");
+Console.WriteLine(" Each run is silent except a progress tick every ~15s; an all-core pass takes a few minutes.)");
 Console.WriteLine();
 try
 {
