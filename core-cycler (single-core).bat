@@ -24,8 +24,22 @@ echo  Press Ctrl + C to stop.
 echo ============================================================
 echo.
 
-"%~dp0dist\ycruncher-monitor.exe" --single --seconds 120 --cycles 0
+rem Locate the exe whether it sits in a dist\ subfolder (repo layout) or next to this .bat (flattened).
+set "EXE=%~dp0dist\ycruncher-monitor.exe"
+if not exist "%EXE%" set "EXE=%~dp0ycruncher-monitor.exe"
+if not exist "%EXE%" (
+    echo [ERROR] ycruncher-monitor.exe not found. Looked in:
+    echo     %~dp0dist\ycruncher-monitor.exe
+    echo     %~dp0ycruncher-monitor.exe
+    echo Put this .bat in the SAME folder as ycruncher-monitor.exe
+    echo ^(or keep the exe in a "dist" subfolder next to it^).
+    echo.
+    pause
+    exit /b 1
+)
+
+"%EXE%" --single --seconds 120 --cycles 0
 
 echo.
-echo Finished. Logs (and lastalive.txt) are in dist\logs.
+echo Finished. Logs (and lastalive.txt) are next to the exe, in its logs folder.
 pause
