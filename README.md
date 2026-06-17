@@ -30,6 +30,14 @@ permanent CSV log so the failing core is recorded even when Windows logs nothing
 > you do with that information is your decision (and your risk). See
 > [Disclaimer](#disclaimer).
 
+> **🔎 Hardware-level detection (WHEA / MCA):** it also reads the CPU's machine-check
+> events from Windows and tags each hardware error **RAM/IMC vs CPU-core vs PCIe** at the
+> hardware level (see [detector #5](#how-it-works) and
+> [Hardware-level attribution](#hardware-level-attribution-whea--mca)). **But a DRAM/memory
+> error is only *reportable* with ECC memory on an ECC-reporting board** — an **ECC UDIMM on
+> a supporting AM5 board**, or server **RDIMMs**. Consumer **non-ECC DDR5** has only silent
+> on-die ECC and **cannot be tracked**, so the absence of WHEA memory events never clears RAM.
+
 ---
 
 ## Why this exists
