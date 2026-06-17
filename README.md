@@ -505,6 +505,32 @@ and isolate variables (overclock vs. RAM OC vs. CO) one at a time.
 
 ---
 
+## What's been added (feedback-driven changelog)
+
+This tool has shipped continuously since **v1.0** — most of it shaped by community
+feedback and real-world use (CO testing methodology, setup pitfalls, and false
+positives). Newest first:
+
+| Version | What was added | Feedback / reason it exists |
+|---------|----------------|-----------------------------|
+| **v1.4.0** | **Transient / boost-cycling mode** (`--transient`): pins one core *and* duty-cycles the worker (suspend/resume) so it ramps **idle→load repeatedly**, exposing CO faults that only show on rapid boost swings. | *"A steady 100% load won't find low-load / transient instability."* Correct — so this targets the transient regime directly. Honest about the limit: Windows timing is ~0.5–2 ms (**not** sub-ms), so it's a **complement** to the steady runs, not a Linux sub-ms tool. |
+| **v1.3.1** | Keeps the **display on + blocks sleep/screensaver** during a test (no power-plan change, reverted on exit). | Screensaver / display-off were a source of micro-freeze false positives — removed at the source. |
+| **v1.3.0** | **Ignores micro-freezes within ~2 s of keyboard/mouse input** (logged as environmental, never blamed on a core). | Normal interaction (alt-tab, dismissing a screensaver) was being flagged as a hitch. |
+| **v1.2.3** | Detects a **launcher-only y-cruncher install** and explains the fix. | Users copied only `y-cruncher.exe` (not `Binaries\`) and it looked broken. |
+| **v1.2.2** | **Live progress heartbeat** every ~15 s. | Silent runs "looked frozen" (y-cruncher.exe sits at ~0%; the child does the work). |
+| **v1.2.1** | Dedicated **RAM/IMC launcher** (`mem-test`). | Make memory-only testing a one-click path, separate from CO testing. |
+| **v1.2.0** | **GUID-driven WHEA classification** + the **full-test battery**. | Classify hardware errors by UEFI CPER section-type GUID, not hardcoded bank numbers — adapts to any core / channel / slot count. |
+| **v1.1.0** | **WHEA / MCA hardware-error attribution** (RAM/IMC vs CPU-core vs PCIe). | The only signal here that separates memory from core at the **hardware** level. |
+| **v1.0.2** | **Per-core targeting** (`--core` / `--cores`). | Soak one suspect core continuously instead of splitting the night across all cores. |
+| **v1.0.1** | Launcher path fix. | — |
+| **v1.0.0** | Initial release: all-core + single-core (CoreCycler-style) diagnosis, micro-freeze monitor, reboot-surviving crash breadcrumb, sensor-free slowdown detection, permanent CSV log. | — |
+
+> Keeping this honest matters more than looking finished: where a method has a real
+> limit (non-ECC DDR5 can't be WHEA-tracked; Windows timing isn't sub-ms; a short
+> *pass* proves nothing), that limit is stated in plain text rather than glossed over.
+
+---
+
 ## Disclaimer
 
 **Use this software, and change any overclocking / undervolting setting, entirely
