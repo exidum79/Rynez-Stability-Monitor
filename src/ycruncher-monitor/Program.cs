@@ -171,6 +171,7 @@ if (!args.Any(a => a.Equals("--no-hitch", StringComparison.OrdinalIgnoreCase)))
     hitch = new StallMonitor(logger, hitchMs, cts.Token, () => currentCore.Value);
     hitch.Start();
     Console.WriteLine($"  micro-freeze monitor ON (>= {hitchMs:F0}ms). single-core: blamed on the pinned core; all-core: informational.");
+    Console.WriteLine("    (hitches within ~2s of keyboard/mouse input are ignored as environmental - e.g. app switching.)");
 }
 
 // WHEA hardware-error reader (ON by default). Reads the CPU's Machine Check Architecture via the
@@ -376,7 +377,7 @@ finally
     }
     Console.WriteLine("======== Final result ========");
     logger.PrintScoreboard();
-    if (hitch != null) { Console.WriteLine($"Micro-freezes: {hitch.HitchCount} (worst {hitch.WorstMs:F0}ms)."); hitch.Dispose(); }
+    if (hitch != null) { Console.WriteLine($"Micro-freezes: {hitch.HitchCount} (worst {hitch.WorstMs:F0}ms); {hitch.EnvHitchCount} ignored as environmental (near user input)."); hitch.Dispose(); }
 
     // ---- Hardware-level attribution (WHEA / MCA) ----
     if (whea != null)

@@ -22,6 +22,20 @@ internal static class Native
     public const uint CTRL_C_EVENT = 0, CTRL_BREAK_EVENT = 1, CTRL_CLOSE_EVENT = 2,
                       CTRL_LOGOFF_EVENT = 5, CTRL_SHUTDOWN_EVENT = 6;
 
+    // Time since the last keyboard/mouse input, used to tell a real stall from one caused by the user
+    // interacting (alt-tab, dismissing a screensaver, etc.) - those should not be blamed on a core.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+    [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    /// <summary>Milliseconds since the last keyboard/mouse input (uint.MaxValue if unavailable).</summary>
+    public static uint MillisecondsSinceLastInput()
+    {
+        var lii = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (!GetLastInputInfo(ref lii)) return uint.MaxValue;
+        return unchecked((uint)Environment.TickCount - lii.dwTime); // both are GetTickCount-based; wrap-safe
+    }
+
     // GetLogicalProcessorInformation returns the system's core/cache/NUMA relationships.
     // We only need physical-core relationships (RelationProcessorCore = 0); each entry's ProcessorMask
     // is the bitmask of logical processors that belong to that physical core.

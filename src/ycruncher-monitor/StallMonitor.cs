@@ -24,6 +24,12 @@ public sealed class StallMonitor : IDisposable
 
     public int HitchCount { get; private set; }
     public double WorstMs { get; private set; }
+    public int EnvHitchCount { get; private set; } // hitches ignored as environmental (near user input)
+
+    // A hitch within this window of the last keyboard/mouse input is almost certainly caused by the user
+    // interacting (alt-tab, dismissing a screensaver, opening a browser) rather than hardware instability,
+    // so it is logged as informational and NOT blamed on a core.
+    private const uint InputGateMs = 2000;
 
     public StallMonitor(ErrorLogger logger, double thresholdMs, CancellationToken token, Func<int> getCurrentCore)
     {
@@ -52,12 +58,23 @@ public sealed class StallMonitor : IDisposable
 
             if (interval >= _thresholdMs)
             {
+                int core = _getCurrentCore();
+                uint idleMs = Native.MillisecondsSinceLastInput();
+                if (idleMs < InputGateMs)
+                {
+                    // User just interacted (app switch, screensaver dismiss, mouse/keyboard) -> almost
+                    // certainly environmental, not the core. Log as informational, never blame a core.
+                    EnvHitchCount++;
+                    _logger.Log("HITCH", -1, "", "hitch", $"system stutter {interval:F0}ms within {idleMs}ms of user input -> ignored as environmental (not blamed on a core)");
+                    Console.WriteLine($"  [HITCH] {interval:F0}ms within {idleMs}ms of user input -> ignored (environmental, not a core fault)");
+                    continue;
+                }
+
                 HitchCount++;
                 if (interval > WorstMs) WorstMs = interval;
-                int core = _getCurrentCore();
                 if (core >= 0)
-                    // A hitch while one specific core is under test -> blame that core (counts as instability,
-                    // triggers stop-on-detection + culprit banner).
+                    // A hitch while one specific core is under test (and no recent user input) -> blame that
+                    // core (counts as instability, triggers stop-on-detection + culprit banner).
                     _logger.Log("TRANSIENT", core, "", "hitch", $"system stutter {interval:F0}ms during core {core} test -> momentary stall");
                 else
                     // No single core under test (idle / all-core) -> informational only, no stop.

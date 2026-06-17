@@ -361,6 +361,26 @@ That is normal — it is almost certainly **running**, not stuck:
   the **whole** y-cruncher folder so `tools\Binaries\` (the per-architecture worker `.exe`s)
   is present.
 
+### Micro-freeze (`[HITCH]`) false positives
+
+The micro-freeze monitor measures scheduling latency, so it flags **any** momentary stall —
+including ones caused by normal OS activity, not your CO:
+
+- **App switching, opening a browser, dismissing a screensaver** → a 15–30 ms blip.
+- **Display power on/off and animated screensavers** (GPU + compositor work) → larger blips.
+- Weaker CPUs/iGPUs hit this more easily (e.g. browser + YouTube) because there is less
+  scheduling headroom; a strong CPU may never see it from the same activity.
+
+To reduce noise, the monitor now **ignores any hitch within ~2 s of keyboard/mouse input**
+(logged as *environmental*, never blamed on a core) — so alt-tabbing or dismissing a
+screensaver won't be counted. What it can't auto-detect is an **idle animated screensaver**
+or **passive video playback** (no input involved), so for a clean run:
+
+- **Disable the screensaver and display-sleep, and don't interact** with the machine.
+- A real CO fault shows as a hitch while the machine is **left idle under load**, or as a
+  y-cruncher error / WHEA event / hard freeze — not a one-off blip when you touch the PC.
+- Still too noisy? Raise the threshold: `--hitch-ms 25` (or `30`), or disable it with `--no-hitch`.
+
 ### How long to run
 
 Curve Optimizer instability is **intermittent**, so run time matters — but the
