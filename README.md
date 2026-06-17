@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue)](#requirements)
 
-> **▶ [Download the latest build (ready-to-run .exe, no .NET install needed)](https://github.com/exidum79/Rynez-Stability-Monitor/releases/latest)** — then drop in your own y-cruncher (see [Setup](#y-cruncher-is-not-included)).
+> **▶ [Download the latest release](https://github.com/exidum79/Rynez-Stability-Monitor/releases/latest)** — grab the **`...-win-x64.zip`** (ready-to-use: exe + launchers + `tools\` folder, no .NET install needed), extract it, then drop in your own y-cruncher (see [Quick start](#quick-start-download)).
 
 A small, focused Windows tool for **diagnosing which CPU core is unstable** when
 you are tuning an AMD Ryzen with **Curve Optimizer / PBO** (and similar
@@ -88,10 +88,29 @@ confined.
 
 ---
 
+## Quick start (download)
+
+1. **Download** the **`Rynez-Stability-Monitor-...-win-x64.zip`** from the
+   [latest release](https://github.com/exidum79/Rynez-Stability-Monitor/releases/latest)
+   and extract it anywhere. You get this layout:
+   ```
+   Rynez-Stability-Monitor\
+     ycruncher-monitor.exe
+     y-cruncher-monitor (all-core).bat
+     core-cycler (single-core).bat
+     tools\            <- put y-cruncher here
+   ```
+2. **Add y-cruncher** (not bundled — see below) so that `tools\y-cruncher.exe`
+   exists.
+3. **Run** a launcher (it auto-requests Administrator), e.g. double-click
+   `core-cycler (single-core).bat`.
+
+The release exe is **self-contained** — no .NET install is required to run it.
+
 ## Requirements
 
-- **Windows** (x64), with the **.NET 8 Desktop Runtime** to run the prebuilt
-  binary, or the **.NET 8 SDK** to build it yourself.
+- **Windows** (x64). The released binary is self-contained (**no .NET runtime
+  needed**); the **.NET 8 SDK** is only needed to [build](#build) it yourself.
 - An **AMD Ryzen** (the workflow is written around Curve Optimizer / PBO, but the
   stress + per-core attribution is generally useful).
 - **y-cruncher** — **you must supply it yourself** (see below). Run as
@@ -101,14 +120,14 @@ confined.
 ### y-cruncher is not included
 
 This tool does **not** bundle y-cruncher — it has its own license and is not
-redistributed here. Download it yourself from the official site and drop it into
-`dist/tools/`:
+redistributed here. Download it yourself from the official site:
 
 1. Get y-cruncher: **http://www.numberworld.org/y-cruncher/**
    Use the **latest version** — that is the version this tool was developed and
    tested against.
-2. Copy its contents into `dist/tools/` so that **`dist/tools/y-cruncher.exe`**
-   exists (see [`dist/tools/README.md`](dist/tools/README.md)).
+2. Put its contents in the **`tools`** folder **next to `ycruncher-monitor.exe`**
+   so that **`tools\y-cruncher.exe`** exists. (If you built from source instead,
+   that folder is `dist/tools/` — see [`dist/tools/README.md`](dist/tools/README.md).)
 
 The monitor refuses to start (with a download hint) if `y-cruncher.exe` is
 missing.
@@ -132,12 +151,16 @@ The easiest way is the two batch files (they auto-request Administrator):
 - **`y-cruncher-monitor (all-core).bat`** — all-core diagnosis.
 - **`core-cycler (single-core).bat`** — single-core (high-boost) diagnosis.
 
-Or run the executable directly:
+Or run the executable directly (path depends on your layout — the package root
+for a downloaded release, or `dist\` for a source build):
 
 ```sh
-dist\ycruncher-monitor.exe                       # all-core, loop until you stop / first error
-dist\ycruncher-monitor.exe --single              # single-core sweep over every core
+ycruncher-monitor.exe                            # all-core, loop until you stop / first error
+ycruncher-monitor.exe --single                   # single-core sweep over every core
 ```
+
+The `.bat` launchers find `ycruncher-monitor.exe` whether it sits next to them or
+in a `dist\` subfolder, so both layouts work.
 
 ### Options
 
@@ -158,7 +181,7 @@ CO at high frequency), `FFTv4` is the heaviest AVX-512 (→ max current/heat, lo
 Vdroop), `N63` is an NTT integer path (→ silent errors FFT misses), `VT3` is
 memory-coupled. Valid tokens: `BKT BBP SFTv4 SNT SVT FFTv4 NTT63 N63 VSTv3 VT3`.
 
-### Output & logs (in `dist/logs/`)
+### Output & logs (in the `logs/` folder next to the exe)
 
 - `rynez_<timestamp>.csv` — the permanent, append-only event log.
 - `lastalive.txt` — the 1-second crash breadcrumb (read on the next launch).
