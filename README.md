@@ -22,6 +22,10 @@ nothing.
 > *where* a fault surfaced, not proof of the root cause. It **cannot** separate RAM
 > vs. memory controller vs. CPU core on its own; that needs isolating one variable
 > at a time (see [Attribution & limitations](#attribution--limitations-read-this)).
+> **⚠️ The micro-freeze detection and the "problem core" result can be
+> false-positived by a RAM overclock or an unstable memory controller (IMC). A fault
+> is attributable to the CPU core (CO) only when RAM and the IMC are 100% stable** —
+> prove memory first, then trust the core label.
 > **It does not change any BIOS / Curve Optimizer / voltage setting for you** — what
 > you do with that information is your decision (and your risk). See
 > [Disclaimer](#disclaimer).
