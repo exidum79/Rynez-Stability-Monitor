@@ -178,6 +178,14 @@ consensus, not this tool's shortcomings:
 - **APIC-ID → core mapping** for a processor WHEA event is best-effort; the reliable
   part is the **domain** (memory vs core), not the exact core number.
 
+> Portability note: the WHEA **event IDs and field names come from the Windows OS
+> provider**, so they are the same on every x64 machine and do **not** change with your
+> CPU / RAM-bank / PCIe-slot count — only the field *values* do, and the reader reads
+> them by name. The one platform assumption is `bank 16/17 = UMC`, which holds on
+> mainstream **AM4/AM5 desktop** Ryzen (2 memory controllers); Threadripper/EPYC and
+> Intel differ there, but the dedicated memory event IDs still classify memory errors
+> correctly regardless.
+
 Industry research reaches the same place — without a vendor's internal test structures
 you can observe *which* core miscomputed but generally **cannot prove root cause** from
 one tool:

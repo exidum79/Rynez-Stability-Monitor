@@ -27,8 +27,13 @@ public sealed record WheaEvent(
 /// </summary>
 public sealed class WheaReader
 {
-    // AMD Zen MCA bank -> rough unit name. Only 16/17 (UMC) are treated as the memory domain; the
-    // rest are best-effort hints - the reliable signal is "memory vs not", not the exact unit.
+    // AMD Zen MCA bank -> rough unit name. Bank 16/17 = UMC is the MEMORY domain on mainstream
+    // AM4/AM5 desktop (2 memory controllers); Threadripper/EPYC have more UMCs on different banks,
+    // and Intel numbers banks differently. So this bank->memory shortcut is a SECONDARY hint - the
+    // primary, vendor-neutral memory signal is the dedicated memory event IDs (22/23/46/47/48/49),
+    // which Windows decodes regardless of platform. The event IDs and field names themselves come
+    // from the OS WHEA provider, so they are identical across machines (they do not scale with the
+    // CPU/RAM/PCIe count); only the field VALUES differ, and we read those by name.
     private static readonly Dictionary<int, string> ZenBankHint = new()
     {
         [0] = "LS (load/store)", [1] = "IF (instruction fetch)", [2] = "L2", [3] = "DE (decode)",
