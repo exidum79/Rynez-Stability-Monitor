@@ -68,7 +68,19 @@ public sealed class YCruncherRunner
     public YcResult RunSingleCore(ulong affinityMask, int durationSeconds, CancellationToken token)
         => Run(durationSeconds, affinityMask, token);
 
-    private YcResult Run(int durationSeconds, ulong affinityMask, CancellationToken token)
+    /// <summary>
+    /// Single-core TRANSIENT / boost-cycling mode: pin y-cruncher to ONE physical core (so it boosts to
+    /// its single-core ceiling) AND duty-cycle its worker - run for <paramref name="burstMs"/>, suspend it
+    /// for <paramref name="idleMs"/>, repeat - so the core keeps ramping idle->load. That rapid boost-clock
+    /// swing is where a class of Curve Optimizer faults hides that a STEADY 100% load never triggers.
+    /// y-cruncher's own math self-check still runs, so a silent compute error is still caught.
+    /// NOTE: Windows timer granularity is ~0.5-2ms, NOT sub-ms - this approximates transient stress; it
+    /// does not match a Linux sub-ms tool. It surfaces more transient exposure than steady load, no more.
+    /// </summary>
+    public YcResult RunTransient(ulong affinityMask, int durationSeconds, int burstMs, int idleMs, CancellationToken token)
+        => Run(durationSeconds, affinityMask, token, Math.Max(1, burstMs), Math.Max(1, idleMs));
+
+    private YcResult Run(int durationSeconds, ulong affinityMask, CancellationToken token, int burstMs = 0, int idleMs = 0)
     {
         string exe = DefaultExePath();
         if (!File.Exists(exe)) return new(YcOutcome.NotFound, "y-cruncher.exe not found in tools\\", -1);
@@ -113,6 +125,16 @@ public sealed class YCruncherRunner
             try { proc.ProcessorAffinity = (IntPtr)(long)affinityMask; } catch { }
         }
 
+        // Transient / boost-cycling: a background thread duty-cycles the pinned worker (suspend/resume) so
+        // the core ramps idle->load repeatedly instead of holding a steady clock. Only when burstMs > 0.
+        Thread? dutyThread = null;
+        if (burstMs > 0)
+        {
+            dutyThread = new Thread(() => DutyCycleWorker(proc, burstMs, idleMs, token))
+            { IsBackground = true, Priority = ThreadPriority.Highest, Name = "transient-duty" };
+            dutyThread.Start();
+        }
+
         var runSw = Stopwatch.StartNew();
         try
         {
@@ -148,7 +170,69 @@ public sealed class YCruncherRunner
                 return new(YcOutcome.Crashed, $"exited after only {runSw.Elapsed.TotalSeconds:F0}s (expected ~{totalLimit}s) - it did not actually run. See tools\\yc_stress.log (e.g. invalid parameter / missing binary).", -1);
             return new(YcOutcome.Completed, "", -1);
         }
-        finally { proc.Dispose(); affinityJob?.Dispose(); }
+        finally { try { dutyThread?.Join(1500); } catch { } proc.Dispose(); affinityJob?.Dispose(); }
+    }
+
+    // Find the y-cruncher worker child (the busy process in tools\Binaries\) and duty-cycle it: let it run
+    // for burstMs (core ramps to boost), suspend it for idleMs (core drops clock), repeat. Pinned to one
+    // core, this produces the rapid boost swings a steady 100% load never does. y-cruncher's self-check is
+    // untouched - suspend/resume is transparent to it - so a silent compute error is still detected.
+    private void DutyCycleWorker(Process launcher, int burstMs, int idleMs, CancellationToken token)
+    {
+        Process? worker = FindWorkerChild(token);
+        if (worker == null)
+        {
+            Console.WriteLine("      [transient] could not find the y-cruncher worker child - this run falls back to steady single-core load.");
+            return;
+        }
+        IntPtr h = Native.OpenForSuspendResume(worker.Id);
+        if (h == IntPtr.Zero)
+        {
+            Console.WriteLine("      [transient] could not open the worker for suspend/resume - this run falls back to steady single-core load.");
+            worker.Dispose();
+            return;
+        }
+        try
+        {
+            while (!token.IsCancellationRequested && !SafeHasExited(launcher) && !SafeHasExited(worker))
+            {
+                Thread.Sleep(burstMs);                          // load burst: worker runs, core ramps up
+                if (token.IsCancellationRequested || SafeHasExited(worker)) break;
+                Native.SuspendProcess(h);                       // idle gap: core drops its clock
+                Thread.Sleep(idleMs);
+                Native.ResumeProcess(h);                        // next load burst -> boost ramp again
+            }
+        }
+        finally
+        {
+            Native.ResumeProcess(h);                            // never leave the worker frozen
+            Native.CloseProcessHandle(h);
+            worker.Dispose();
+        }
+    }
+
+    private static bool SafeHasExited(Process p) { try { return p.HasExited; } catch { return true; } }
+
+    // The worker is the running process whose image lives in tools\Binaries\ (e.g. "24-ZN5 ~ Komari.exe").
+    // y-cruncher.exe is only the launcher; in this tool's setup the worker is the only process running from
+    // that folder. Polls briefly because the launcher spawns the worker a moment after start.
+    private Process? FindWorkerChild(CancellationToken token)
+    {
+        string binDir = BinariesDir().TrimEnd('\\', '/');
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed.TotalSeconds < 10 && !token.IsCancellationRequested)
+        {
+            foreach (var p in Process.GetProcesses())
+            {
+                bool match = false;
+                try { match = p.MainModule?.FileName?.StartsWith(binDir, StringComparison.OrdinalIgnoreCase) == true; }
+                catch { /* access denied / exited -> not our worker */ }
+                if (match) return p;
+                try { p.Dispose(); } catch { }
+            }
+            Thread.Sleep(150);
+        }
+        return null;
     }
 
     private YcResult Error(string line, string logPath)

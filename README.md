@@ -65,12 +65,13 @@ failure to a specific physical core.
 
 ## How it works
 
-### Two test modes
+### Test modes
 
 | Mode | What it does | What it catches |
 |------|--------------|-----------------|
 | **All-core** (default) | y-cruncher self-pins across **every** core (heavy AVX-512 + large memory). | Load-line / Vdroop and thermal-regime instability. On an error, the failing logical core from y-cruncher's own message is mapped to a physical core. |
 | **Single-core** (`--single`) | y-cruncher is confined to **one physical core at a time** via a Windows **Job Object affinity mask**, so that core boosts to its **single-core ceiling**. | Curve Optimizer instability in the **high-boost / light-load** regime that all-core testing hides (see "[My experience](#my-experience-author-notes)"). The core under test is known because *we* pinned it, so any error or freeze is blamed on it. |
+| **Transient** (`--transient`) | Single-core **plus** the worker is **duty-cycled** — suspended for `--idle-ms`, resumed for `--burst-ms`, repeatedly — so the pinned core **ramps idle→load over and over** instead of holding a steady clock. | Curve Optimizer faults that only show on **rapid boost-clock swings (the transient regime)**, which a steady 100% load never triggers. y-cruncher's own math self-check still runs, so silent compute errors are still caught. **Honest limit:** Windows timer granularity is ~0.5–2 ms (**not** sub-ms), so it adds real transient exposure over steady load but does **not** match a Linux sub-ms tool — treat it as a *complement* to the other two modes (see [Transient / boost-cycling mode](#transient--boost-cycling-mode)). |
 
 Single-core confinement is done purely by a **Job Object affinity limit** (plus a
 process-affinity hint). y-cruncher's `stress` command has no per-core option and
@@ -83,6 +84,35 @@ confined.
 > Curve Optimizer errors at high boost). What this tool adds on top is the
 > combined all-core mode, the micro-freeze monitor, the reboot-surviving crash
 > breadcrumb, the sensor-free slowdown detection, and the permanent CSV log.
+
+### Transient / boost-cycling mode
+
+A fair criticism of *any* steady-load core tester (this one included, and CoreCycler):
+**pegging a core at a constant 100% holds it at one operating point.** A meaningful
+class of Curve Optimizer faults on Zen instead shows up in the **transient** regime —
+the rapid **idle→load boost ramps** where the requested clock jumps faster than the
+voltage rail settles, so Vmin is momentarily violated. Peak clock matters less than
+**how fast the boost clock swings**.
+
+`--transient` targets that. It runs the **single-core** pin (so the core boosts to its
+ceiling) **and** duty-cycles the worker on top: a high-priority thread **suspends** the
+y-cruncher worker for `--idle-ms` (the core drops its clock), then **resumes** it for
+`--burst-ms` (the core ramps back to boost), over and over. Suspend/resume is transparent
+to y-cruncher, so its **own math self-check still runs** — a silent compute error is still
+caught; you just also get the boost-swing stress a steady load can't produce.
+
+> **Honest limitation — read this.** Windows scheduler/timer granularity is **~0.5–2 ms**,
+> **not** sub-millisecond. So this **cannot** reproduce the sub-1 ms boost residency a
+> dedicated Linux tool (e.g. *Threadstepper*) can. It is **not** a sub-ms transient tester.
+> What it honestly is: **meaningful boost-cycling that exposes more transient behaviour than
+> steady load**, within what Windows timing allows. Use it as a **complement** to the steady
+> single-core and all-core runs, not a replacement — and if the worker child can't be found
+> or suspended, the run simply falls back to steady single-core load (still a valid test).
+
+Tune the duty cycle with `--burst-ms` / `--idle-ms` (defaults `5` / `5`). Lower values pack
+in more idle→load swings per second but get jittery as they approach the timer floor; the
+idle gap should stay long enough (a few ms) for the core to actually drop its clock between
+bursts. Launch it with **`core-cycler (transient boost).bat`**.
 
 ### The detectors
 
@@ -230,6 +260,7 @@ one tool:
      y-cruncher-monitor (all-core).bat
      core-cycler (single-core).bat
      core-cycler (pick cores).bat
+     core-cycler (transient boost).bat
      mem-test (RAM-IMC).bat
      full-test (RAM-IMC + CPU-CO).bat
      tools\            <- put y-cruncher here
@@ -309,6 +340,12 @@ The easiest way is the batch files (they auto-request Administrator):
   ```
   Use this to **soak one suspect core continuously** (e.g. the core that failed
   before) instead of splitting the night across all cores.
+- **`core-cycler (transient boost).bat`** — **transient / boost-cycling** single-core:
+  duty-cycles the pinned worker so the core ramps **idle→load repeatedly**, exposing CO
+  faults that only show on rapid boost swings (steady load misses them). Edit `BURST` /
+  `IDLE` (ms) and optionally `CORES` at the top. **Honest limit:** Windows timing is
+  ~0.5–2 ms (not sub-ms) — a complement to the steady runs, not a sub-ms tester (see
+  [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
 - **`mem-test (RAM-IMC).bat`** — **RAM / IMC only**: all-core, memory-coupled tests
   with a large memory footprint, looping. Edit `MEM` at the top to most of your free
   RAM for the heaviest memory stress. WHEA tags a memory fault `RAM/IMC`. (Still pair
@@ -328,6 +365,8 @@ ycruncher-monitor.exe                            # all-core, loop until you stop
 ycruncher-monitor.exe --single                   # single-core sweep over every core
 ycruncher-monitor.exe --core 0                   # single-core on ONLY core 0 (continuous soak)
 ycruncher-monitor.exe --cores 0,2,5              # single-core on ONLY cores 0, 2 and 5
+ycruncher-monitor.exe --transient                # transient boost-cycling sweep (idle->load swings)
+ycruncher-monitor.exe --transient --core 0 --burst-ms 5 --idle-ms 5   # transient soak of one core
 ```
 
 The `.bat` launchers find `ycruncher-monitor.exe` whether it sits next to them or
@@ -340,6 +379,9 @@ in a `dist\` subfolder, so both layouts work.
 | `--single` | off | Single-core mode: pin one core at a time (high-boost CO testing). |
 | `--core N` | — | Single-core on **only** physical core N (implies `--single`). Continuous soak of one suspect core. |
 | `--cores 0,2,5` | — | Single-core on **only** the listed physical cores (comma-separated; implies `--single`). |
+| `--transient` | off | Transient / boost-cycling: single-core **plus** duty-cycling the worker (suspend/resume) so the core ramps idle→load repeatedly — exposes CO faults that only show on rapid boost swings. Implies `--single`. ~0.5–2 ms granularity (not sub-ms). |
+| `--burst-ms N` | `5` | Transient load-burst length (ms) — how long the worker runs each cycle. |
+| `--idle-ms N` | `5` | Transient idle-gap length (ms) — how long the worker is suspended each cycle (lets the core drop its clock). |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
 | `--stop-on N` | `1` | Stop after N problem events. `0` = never stop. |

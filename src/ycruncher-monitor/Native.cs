@@ -55,6 +55,24 @@ internal static class Native
     /// <summary>Restore normal power behaviour (release the keep-awake request).</summary>
     public static void AllowSleep() => SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
 
+    // Suspend / resume a whole process (all its threads) via ntdll. Used by transient / boost-cycling
+    // mode to duty-cycle the y-cruncher worker on a pinned core: suspend it for a few ms, resume it for a
+    // few ms, repeat - forcing the core to ramp idle->load->idle rapidly instead of sitting at a steady
+    // clock. NtSuspend/ResumeProcess are undocumented but stable across every modern Windows.
+    [DllImport("ntdll.dll")] private static extern uint NtSuspendProcess(IntPtr processHandle);
+    [DllImport("ntdll.dll")] private static extern uint NtResumeProcess(IntPtr processHandle);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr h);
+    private const uint PROCESS_SUSPEND_RESUME = 0x0800;
+
+    /// <summary>Open a handle to a process with suspend/resume rights (IntPtr.Zero on failure).</summary>
+    public static IntPtr OpenForSuspendResume(int pid) => OpenProcess(PROCESS_SUSPEND_RESUME, false, pid);
+    /// <summary>Freeze every thread of the process (no-op on a null handle).</summary>
+    public static void SuspendProcess(IntPtr processHandle) { if (processHandle != IntPtr.Zero) NtSuspendProcess(processHandle); }
+    /// <summary>Unfreeze every thread of the process (no-op on a null handle).</summary>
+    public static void ResumeProcess(IntPtr processHandle) { if (processHandle != IntPtr.Zero) NtResumeProcess(processHandle); }
+    public static void CloseProcessHandle(IntPtr h) { if (h != IntPtr.Zero) CloseHandle(h); }
+
     // GetLogicalProcessorInformation returns the system's core/cache/NUMA relationships.
     // We only need physical-core relationships (RelationProcessorCore = 0); each entry's ProcessorMask
     // is the bitmask of logical processors that belong to that physical core.

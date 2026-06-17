@@ -39,7 +39,17 @@ Console.WriteLine();
 //   --core N       : single-core mode on ONLY physical core N (continuous soak of one suspect core).
 //   --cores 0,2,5  : single-core mode on ONLY the listed physical cores (comma-separated).
 //                    Both imply --single. With neither, single mode sweeps every core.
+//   --transient    : single-core boost-cycling. Pin one core AND duty-cycle the worker (suspend/resume)
+//                    so the core ramps idle->load repeatedly, exposing CO faults that only show on rapid
+//                    boost swings (not on steady load). Implies --single. Tune --burst-ms / --idle-ms.
+//                    Windows timer granularity is ~0.5-2ms (NOT sub-ms): it adds transient exposure, it
+//                    does not match a Linux sub-ms tool.
+//   --burst-ms N   : transient load-burst length in ms (default 5).
+//   --idle-ms  N   : transient idle-gap length in ms (default 5).
 bool single = args.Any(a => a.Equals("--single", StringComparison.OrdinalIgnoreCase));
+bool transient = args.Any(a => a.Equals("--transient", StringComparison.OrdinalIgnoreCase));
+int burstMs = GetIntArg(args, "--burst-ms", 5);
+int idleMs = GetIntArg(args, "--idle-ms", 5);
 int perCoreSeconds = GetIntArg(args, "--seconds", 120);
 int cycles = GetIntArg(args, "--cycles", 0);
 int stopOn = GetIntArg(args, "--stop-on", 1);
@@ -47,6 +57,7 @@ string ycTests = GetStrArg(args, "--yc-tests", "BKT FFTv4 N63 VT3");
 string ycMem = GetStrArg(args, "--yc-mem", ""); // empty = let y-cruncher auto-size (good for all-core)
 var coreSel = ParseCoreSelection(args);          // requested physical core indices (empty = all)
 if (coreSel.Count > 0) single = true;            // selecting cores only makes sense pinned -> force single-core
+if (transient) single = true;                    // transient boost-cycling pins one core -> force single-core
 
 string logDir = Path.Combine(AppContext.BaseDirectory, "logs");
 using var logger = new ErrorLogger(logDir);
@@ -132,8 +143,14 @@ if (single)
 {
     bool allCores = coresToTest.Count == topo.Cores.Count;
     string coreList = allCores ? "every core" : $"core(s) {string.Join(",", coresToTest.Select(c => c.Index))}";
-    Console.WriteLine($"  SINGLE-CORE mode: one core pinned at a time (high single-core boost), tests: {ycTests}, mem: {memDesc}");
+    string modeName = transient ? "TRANSIENT (single-core boost-cycling)" : "SINGLE-CORE";
+    Console.WriteLine($"  {modeName} mode: one core pinned at a time (high single-core boost), tests: {ycTests}, mem: {memDesc}");
     Console.WriteLine($"  testing {coreList}; per core one full pass of all tests, {(cycles == 0 ? "looping until you stop / first error" : cycles + " sweep(s)")}");
+    if (transient)
+    {
+        Console.WriteLine($"  worker duty-cycled {burstMs}ms load / {idleMs}ms idle -> the core ramps idle->load repeatedly (boost swings a steady load misses).");
+        Console.WriteLine("    note: Windows timer granularity is ~0.5-2ms, NOT sub-ms - this adds transient exposure, it does not match a Linux sub-ms tool.");
+    }
     Console.WriteLine("  Any error/micro-freeze on a pinned core is blamed on THAT core.");
 }
 else
@@ -210,7 +227,7 @@ logger.OnInstability = (src, core, detail) =>
 
 // ---- 1-second crash breadcrumb (survives a hard reboot, names the core under test) ----
 int cycle = 0;
-trail.Start(() => $"engine=y-cruncher\nmode={(single ? "single" : "allcore")}\npass={cycle}\ncore_under_test={(currentCore.Value < 0 ? "-" : currentCore.Value.ToString())}",
+trail.Start(() => $"engine=y-cruncher\nmode={(transient ? "transient" : single ? "single" : "allcore")}\npass={cycle}\ncore_under_test={(currentCore.Value < 0 ? "-" : currentCore.Value.ToString())}",
             cts.Token);
 
 // ---- Timing + sensor-free slowdown detection ----
@@ -328,10 +345,12 @@ try
                 currentCore.Value = core.Index;
                 Console.WriteLine($"-- run {runNo} | sweep {cycle}{(cycles == 0 ? "" : "/" + cycles)} | core {core.Index} | elapsed {FmtElapsed()} --");
                 logger.Log("CYCLE", core.Index, "", "", $"sweep {cycle} core {core.Index} start (single-core)");
-                Console.WriteLine($"  > y-cruncher single-core stress, pinned to core {core.Index} (one full pass of all tests)...");
+                Console.WriteLine($"  > y-cruncher {(transient ? "transient boost-cycling" : "single-core")} stress, pinned to core {core.Index} (one full pass of all tests)...");
 
                 var sw = Stopwatch.StartNew();
-                var r = ycRunner.RunSingleCore(core.Mask, perCoreSeconds, cts.Token);
+                var r = transient
+                    ? ycRunner.RunTransient(core.Mask, perCoreSeconds, burstMs, idleMs, cts.Token)
+                    : ycRunner.RunSingleCore(core.Mask, perCoreSeconds, cts.Token);
                 sw.Stop();
                 HandleResult(r, core.Index);
                 Console.WriteLine($"    this run {sw.Elapsed.TotalSeconds:F0}s | elapsed {FmtElapsed()}");
