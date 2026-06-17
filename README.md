@@ -221,12 +221,27 @@ one tool:
      y-cruncher-monitor (all-core).bat
      core-cycler (single-core).bat
      core-cycler (pick cores).bat
+     mem-test (RAM-IMC).bat
+     full-test (RAM-IMC + CPU-CO).bat
      tools\            <- put y-cruncher here
    ```
-2. **Add y-cruncher** (not bundled — see below) so that `tools\y-cruncher.exe`
-   exists.
+2. **Add y-cruncher** (not bundled — separate license). Download the **latest** from
+   **http://www.numberworld.org/y-cruncher/** and extract its **WHOLE folder** into
+   `tools\`. When done, `tools\` must look like this:
+   ```
+   tools\
+     y-cruncher.exe          <- the launcher
+     Binaries\               <- REQUIRED: the worker .exe's (e.g. "24-ZN5 ~ Komari.exe")
+     (Custom Formulas\, *.dll, *.txt, ...)   <- everything else from the y-cruncher folder
+   ```
+   > ⚠️ **The #1 setup mistake: copying only `y-cruncher.exe`.** That file is *just a
+   > launcher* — the real stress runs in a **child process inside `tools\Binaries\`**. If
+   > you copy only the launcher, the monitor **refuses to start** and tells you the worker
+   > binaries are missing. So copy the **entire** y-cruncher folder, not just the one .exe.
+   > (Don't worry if `y-cruncher.exe` shows **0%** in Task Manager later — that's normal,
+   > the busy process is the `…Binaries\… .exe` child.)
 3. **Run** a launcher (it auto-requests Administrator), e.g. double-click
-   `core-cycler (single-core).bat`.
+   `core-cycler (single-core).bat`. A correct setup prints `y-cruncher.exe + Binaries\ found.`
 
 The release exe is **self-contained** — no .NET install is required to run it.
 
