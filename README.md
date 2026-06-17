@@ -73,6 +73,9 @@ confined.
    the system failed to schedule **anything** for 30 ms = a stall/stutter the user
    feels. In single-core mode this is blamed on the pinned core; in all-core mode
    it is informational. Tune with `--hitch-ms N`, disable with `--no-hitch`.
+   ⚠️ **A RAM overclock or an unstable memory controller (IMC) can trigger
+   micro-freezes too** — the per-core blame here is only valid once memory/IMC is
+   proven stable (see [Attribution & limitations](#attribution--limitations-read-this)).
 3. **Sensor-free slowdown detection** — a completed run is time-bounded, so its
    wall-clock time should be near-constant. If a run takes noticeably longer than
    the running average, the machine spent time **not executing** (clock
@@ -112,6 +115,11 @@ can and cannot tell you:
   i.e. when you are tuning **Curve Optimizer alone**. With a **RAM overclock + CO +
   SoC/voltage** all changed at once, a single mixed run **cannot** attribute the
   fault to one component. No tool can.
+- **Both signals — the micro-freeze detector and the "problem core N" label — can
+  be false-positived by a RAM overclock or an unstable memory controller (IMC).**
+  An error or stall on a pinned core may actually be the memory/IMC, not the core.
+  **Only when RAM and the IMC are 100% stable can a fault be read as a CPU-core (CO)
+  problem.** Prove memory first (step 1 below), then trust the core label.
 
 **The only way to make attribution possible is to change one variable at a time:**
 
