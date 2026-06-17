@@ -415,6 +415,11 @@ results:
 - Caveat: I haven't yet done real-world light-load usage (e.g. lighter games), so
   **real-world stability is still unproven** — a stress pass is a strong signal,
   not a guarantee.
+- My memory is plain consumer DDR5 with only **on-die ECC** (which corrects silently and
+  is never reported to WHEA), so a RAM/IMC fault could never be cleanly attributed here.
+  Because of that I'm **keeping RAM at stock — no memory overclock.** That takes memory
+  out of the equation and keeps the per-core Curve Optimizer result trustworthy. If I ever
+  want real RAM/IMC attribution, that needs ECC memory on an ECC-reporting board.
 
 Takeaway: **don't trust an all-core "pass" alone.** Re-test in single-core mode,
 and isolate variables (overclock vs. RAM OC vs. CO) one at a time.
