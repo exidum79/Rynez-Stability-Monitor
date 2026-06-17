@@ -54,6 +54,12 @@ rejects engine flags, so the launcher is assigned to the job **before** it spawn
 its architecture child binary — the child inherits the affinity and stays
 confined.
 
+> The single-core mode is the same idea as the well-known
+> [**CoreCycler**](https://github.com/sp00n/corecycler) (per-core load to expose
+> Curve Optimizer errors at high boost). What this tool adds on top is the
+> combined all-core mode, the micro-freeze monitor, the reboot-surviving crash
+> breadcrumb, the sensor-free slowdown detection, and the permanent CSV log.
+
 ### The detectors
 
 1. **y-cruncher self-check** — y-cruncher verifies its own math; a mismatch is a
@@ -180,6 +186,21 @@ from several angles: `BKT` is the lightest (→ highest boost, exposes too-aggre
 CO at high frequency), `FFTv4` is the heaviest AVX-512 (→ max current/heat, load
 Vdroop), `N63` is an NTT integer path (→ silent errors FFT misses), `VT3` is
 memory-coupled. Valid tokens: `BKT BBP SFTv4 SNT SVT FFTv4 NTT63 N63 VSTv3 VT3`.
+
+### How long to run
+
+Curve Optimizer instability is **intermittent**, so run time matters — but the
+two outcomes are not symmetric:
+
+- **A short FAIL is conclusive.** If a core errors or freezes within minutes,
+  that core *is* unstable — done. (This is why single-core mode is useful: it
+  surfaces a real fault fast by letting one core boost high.)
+- **A short PASS is not.** A 10-minute clean run tells you almost nothing. Before
+  you *trust* a configuration, run for **hours, ideally overnight**.
+
+The launchers default to `--cycles 0` (loop until an error or you stop), so they
+are built for long runs — just leave them going. Use a short pass only to move on
+to the next variable, never as a final "stable" verdict.
 
 ### Output & logs (in the `logs/` folder next to the exe)
 
