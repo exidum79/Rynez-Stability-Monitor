@@ -18,9 +18,12 @@ problem is found, and points at the offending core** — then writes everything 
 a permanent CSV log so the failing core is recorded even when Windows logs
 nothing.
 
-> It is a **diagnostic** tool. It tells you *which* core misbehaved. **It does
-> not change any BIOS / Curve Optimizer / voltage setting for you** — what you do
-> with that information is your decision (and your risk). See
+> It is a **diagnostic** tool. It tells you *which loaded core* misbehaved — that is
+> *where* a fault surfaced, not proof of the root cause. It **cannot** separate RAM
+> vs. memory controller vs. CPU core on its own; that needs isolating one variable
+> at a time (see [Attribution & limitations](#attribution--limitations-read-this)).
+> **It does not change any BIOS / Curve Optimizer / voltage setting for you** — what
+> you do with that information is your decision (and your risk). See
 > [Disclaimer](#disclaimer).
 
 ---
@@ -94,6 +97,46 @@ confined.
 
 ---
 
+## Attribution & limitations (read this)
+
+This tool reports **which loaded core** an error or micro-freeze happened on. That
+is **where** it surfaced — not proof of the **root cause**. Be honest about what it
+can and cannot tell you:
+
+- **It cannot separate RAM vs. memory controller (IMC) vs. CPU core.** Even in
+  single-core mode, the pinned core still runs through the **IMC and RAM**. If your
+  memory/IMC is unstable, a single loaded core can error or stall — and the tool
+  will label it "core N." The per-core blame (especially the **micro-freeze**
+  signal) is **correlation, not a verdict**.
+- **The core label is only trustworthy when memory is already proven stable** —
+  i.e. when you are tuning **Curve Optimizer alone**. With a **RAM overclock + CO +
+  SoC/voltage** all changed at once, a single mixed run **cannot** attribute the
+  fault to one component. No tool can.
+
+**The only way to make attribution possible is to change one variable at a time:**
+
+| Step | Setup | Test | If it fails, suspect |
+|------|-------|------|----------------------|
+| 0 | Full **stock** (DDR JEDEC, CO 0, SoC auto) | quick sanity | platform / hardware |
+| 1 | **RAM OC only** (CO off) | a dedicated memory tester (TM5/Karhu/MemTest86) + memory-heavy y-cruncher tests, for hours | **RAM or IMC** |
+| 2 | **CO only** (RAM at stock or a proven profile) | this tool, **single-core / `--core`** | **CPU core CO** |
+| 3 | **Both combined** | both of the above | an **interaction** (shared SoC/VDDIO, power/thermal budget) |
+
+Within step 1, to tell **RAM** from **IMC** apart: lowering the **memory clock**
+(MCLK/FCLK) fixing it points at the **IMC**; loosening **timings** at the same
+clock points at the **DRAM**; `VSOC`/`VDDG` helping points at the IMC, `VDD`/`VDDQ`
+helping points at the DRAM. A **CO** fault, by contrast, is independent of memory
+clock and goes away when you make the offset **less negative**.
+
+Use the test type as a probe: **compute-heavy / low-memory** tests isolate the
+**core/CO**; **memory-heavy** tests isolate **RAM/IMC**.
+
+> Bottom line: this tool is most trustworthy for **CO-only** tuning. If a RAM
+> overclock is also in play, treat the core label as a hint, not a conclusion, and
+> isolate variables first.
+
+---
+
 ## Quick start (download)
 
 1. **Download** the **`Rynez-Stability-Monitor-...-win-x64.zip`** from the
@@ -104,6 +147,7 @@ confined.
      ycruncher-monitor.exe
      y-cruncher-monitor (all-core).bat
      core-cycler (single-core).bat
+     core-cycler (pick cores).bat
      tools\            <- put y-cruncher here
    ```
 2. **Add y-cruncher** (not bundled — see below) so that `tools\y-cruncher.exe`
