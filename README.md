@@ -13,10 +13,10 @@ overclock / undervolt setups).
 
 It drives [y-cruncher](http://www.numberworld.org/y-cruncher/) as the stress
 engine, wraps it with a micro-freeze detector and a reboot-surviving crash
-breadcrumb, times every run to spot silent slowdowns, **stops the moment a
-problem is found, and points at the offending core** — then writes everything to
-a permanent CSV log so the failing core is recorded even when Windows logs
-nothing.
+breadcrumb, times every run to spot silent slowdowns, **reads WHEA hardware
+errors to tag RAM/IMC vs CPU-core machine checks**, **stops the moment a problem
+is found, and points at the offending core** — then writes everything to a
+permanent CSV log so the failing core is recorded even when Windows logs nothing.
 
 > It is a **diagnostic** tool. It tells you *which loaded core* misbehaved — that is
 > *where* a fault surfaced, not proof of the root cause. It **cannot** separate RAM
@@ -90,7 +90,18 @@ confined.
    uncorrectable error reboots the machine instantly, after reboot that file holds
    the state from ~1 second before death = **the core that was running when it
    died**. On the next launch the tool reads it and flags the prime suspect.
-5. **Permanent CSV log** — every event is appended to
+5. **WHEA hardware-error attribution** (on by default) — reads the CPU's **Machine
+   Check Architecture (MCA)** via the Windows event log (`Microsoft-Windows-WHEA-Logger`)
+   and classifies each hardware error by domain: a **memory/IMC** error (a UMC bank
+   — MCA bank 16/17 on AM5 — or a decoded DRAM ECC error) vs a **CPU-core** machine
+   check vs **PCIe/IO**. This is the only signal here that separates RAM/IMC from the
+   core at the **hardware** level. Disable with `--no-whea`.
+   ⚠️ **Non-ECC DDR5 caveat:** a DRAM error only reaches WHEA when ECC is active. On
+   consumer non-ECC memory a RAM-overclock fault is usually silently on-die-corrected
+   or just corrupts/reboots, so it **never appears here** — *absence of WHEA memory
+   events does not clear memory.* True hardware memory attribution needs **ECC UDIMMs
+   on an ECC-capable board**.
+6. **Permanent CSV log** — every event is appended to
    `dist/logs/rynez_<timestamp>.csv` (timestamp, source, core, detail, …). The
    Windows Event Log rotates and gets purged; this file stays.
 
@@ -146,6 +157,36 @@ Use the test type as a probe: **compute-heavy / low-memory** tests isolate the
 > Bottom line: this tool is most trustworthy for **CO-only** tuning. If a RAM
 > overclock is also in play, treat the core label as a hint, not a conclusion, and
 > isolate variables first.
+
+### Hardware-level attribution (WHEA / MCA)
+
+The closest thing to *true* separation is reading the CPU's **Machine Check
+Architecture** directly. AMD Zen records errors per hardware unit in separate MCA
+**banks**: banks **16/17 are the UMC** (Unified Memory Controller) → the **RAM/IMC**
+domain, while the **core/cache** banks (LS, L2, L3, …) are the **core/CO** domain.
+Windows surfaces the same MCA data through **WHEA** (`Microsoft-Windows-WHEA-Logger`),
+split into memory vs processor errors. This tool reads those events and tags each as
+`RAM/IMC`, `CPU-CORE`, or `PCIe/IO` (detector #5 above).
+
+Two hard limits keep this from being a silver bullet — and they are the industry
+consensus, not this tool's shortcomings:
+
+- **Non-ECC DDR5:** MCA only reports a DRAM error when **ECC is active**. On consumer
+  non-ECC memory a RAM-OC fault is silently on-die-corrected or just corrupts/reboots,
+  so it never reaches WHEA. Real hardware memory attribution needs **ECC UDIMMs on an
+  ECC-capable board**.
+- **APIC-ID → core mapping** for a processor WHEA event is best-effort; the reliable
+  part is the **domain** (memory vs core), not the exact core number.
+
+Industry research reaches the same place — without a vendor's internal test structures
+you can observe *which* core miscomputed but generally **cannot prove root cause** from
+one tool:
+
+- Hochschild et al., *“Cores that don't count”*, **HotOS 2021** (Google).
+- Dixit et al., *“Silent Data Corruptions at Scale”*, **2021** (Meta), arXiv:2102.11245.
+- Fair et al., *“RAS of the IBM eServer z990”*, **IBM J. R&D 2004** (lockstep / dual-execution = how clean attribution is actually done, in hardware).
+- Intel, *“Data Center Silent Data Errors”* (2024); Inkley & Mishaeli, *“Finding Faulty Components in a Live Fleet Environment”* (Intel, 2024).
+- Schroeder, Pinheiro & Weber, *“DRAM Errors in the Wild”*, **SIGMETRICS 2009** (Google field data).
 
 ---
 
@@ -249,6 +290,7 @@ in a `dist\` subfolder, so both layouts work.
 | `--yc-mem 1.2G` | auto | Memory size for y-cruncher. Empty = let it auto-size (good for all-core). |
 | `--no-hitch` | off | Turn the micro-freeze monitor off. |
 | `--hitch-ms N` | `15` | Micro-freeze threshold in milliseconds. |
+| `--no-whea` | off | Turn the WHEA hardware-error reader off (it is on by default). |
 
 **Default test selection** (`BKT FFTv4 N63 VT3`) is chosen to expose CO problems
 from several angles: `BKT` is the lightest (→ highest boost, exposes too-aggressive

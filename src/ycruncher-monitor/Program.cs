@@ -32,6 +32,8 @@ Console.WriteLine();
 //        N63 (NTT integer path -> silent errors FFT misses), VT3 (memory-coupled).
 //        Valid tokens: BKT BBP SFTv4 SNT SVT FFTv4 NTT63 N63 VSTv3 VT3. --yc-mem 1.2G
 //   --no-hitch [--hitch-ms 15] : micro-freeze monitor is ON by default; --no-hitch turns it off.
+//   --no-whea      : WHEA hardware-error reader is ON by default (classifies MCA errors as RAM/IMC
+//                    vs CPU core via the Windows event log); --no-whea turns it off.
 //   --core N       : single-core mode on ONLY physical core N (continuous soak of one suspect core).
 //   --cores 0,2,5  : single-core mode on ONLY the listed physical cores (comma-separated).
 //                    Both imply --single. With neither, single mode sweeps every core.
@@ -154,6 +156,23 @@ if (!args.Any(a => a.Equals("--no-hitch", StringComparison.OrdinalIgnoreCase)))
     hitch.Start();
     Console.WriteLine($"  micro-freeze monitor ON (>= {hitchMs:F0}ms). single-core: blamed on the pinned core; all-core: informational.");
 }
+
+// WHEA hardware-error reader (ON by default). Reads the CPU's Machine Check Architecture via the
+// Windows event log and classifies each error as RAM/IMC (UMC bank) vs CPU-core vs PCIe. This is the
+// only signal here that distinguishes memory from core at the HARDWARE level. --no-whea disables it.
+WheaReader? whea = null;
+bool wheaMemSeen = false, wheaCoreSeen = false, anyWheaSeen = false;
+if (!args.Any(a => a.Equals("--no-whea", StringComparison.OrdinalIgnoreCase)))
+{
+    whea = new WheaReader();
+    if (whea.Available)
+        Console.WriteLine("  WHEA hardware-error reader ON - classifies machine-check errors as RAM/IMC vs CPU core.");
+    else
+    {
+        Console.WriteLine($"  WHEA reader unavailable ({whea.LastError}) - continuing without hardware-level attribution.");
+        whea = null;
+    }
+}
 Console.WriteLine();
 
 // ---- Stop as soon as a problem core is found, and remember it ----
@@ -239,6 +258,28 @@ void CheckSlowdown(double durationSec, YcResult r, int pinnedCore)
     runDurations.Add(durationSec);
 }
 
+// Drain any new WHEA hardware-error events and attribute them at the hardware level (RAM/IMC vs core).
+void PollWhea()
+{
+    if (whea == null) return;
+    foreach (var e in whea.PollNew())
+    {
+        anyWheaSeen = true;
+        string tag = e.Domain switch
+        {
+            WheaDomain.MemoryImc => "RAM/IMC",
+            WheaDomain.CpuCore => "CPU-CORE",
+            WheaDomain.PciePlatform => "PCIe/IO",
+            _ => "UNKNOWN",
+        };
+        if (e.Domain == WheaDomain.MemoryImc) wheaMemSeen = true;
+        if (e.Domain == WheaDomain.CpuCore) wheaCoreSeen = true;
+        int coreGuess = e.Domain == WheaDomain.CpuCore && e.ApicId is int ap ? topo.CoreOfLogical(ap) : -1;
+        logger.Log("WHEA", coreGuess, "", "whea", $"[{tag}] {e.Summary}{(e.Corrected ? " (corrected)" : " (uncorrected)")}");
+        Console.WriteLine($"    [WHEA -> {tag}] {e.Summary}{(e.Corrected ? " (corrected)" : " (UNCORRECTED)")}");
+    }
+}
+
 Console.WriteLine($"Starting (Ctrl+C to stop)...");
 Console.WriteLine();
 try
@@ -263,6 +304,7 @@ try
                 HandleResult(r, core.Index);
                 Console.WriteLine($"    this run {sw.Elapsed.TotalSeconds:F0}s | elapsed {FmtElapsed()}");
                 CheckSlowdown(sw.Elapsed.TotalSeconds, r, core.Index);
+                PollWhea();
                 logger.PrintScoreboard();
             }
             currentCore.Value = -1;
@@ -280,6 +322,7 @@ try
             HandleResult(r, -1);
             Console.WriteLine($"    this run {sw.Elapsed.TotalSeconds:F0}s | elapsed {FmtElapsed()}");
             CheckSlowdown(sw.Elapsed.TotalSeconds, r, -1);
+            PollWhea();
             logger.PrintScoreboard();
         }
     }
@@ -289,6 +332,7 @@ finally
     currentCore.Value = -1;
     cts.Cancel();
     trail.MarkCleanExit();
+    if (whea != null) PollWhea(); // catch WHEA events logged just before we stopped
     Console.WriteLine();
     Console.WriteLine($"Total test time: {FmtElapsed()} ({runNo} run(s)).");
     if (instCount > 0)
@@ -315,6 +359,25 @@ finally
     Console.WriteLine("======== Final result ========");
     logger.PrintScoreboard();
     if (hitch != null) { Console.WriteLine($"Micro-freezes: {hitch.HitchCount} (worst {hitch.WorstMs:F0}ms)."); hitch.Dispose(); }
+
+    // ---- Hardware-level attribution (WHEA / MCA) ----
+    if (whea != null)
+    {
+        if (wheaMemSeen)
+        {
+            Console.WriteLine("[WHEA] A MEMORY/IMC (UMC) hardware error was logged this session.");
+            Console.WriteLine("       -> A 'core N' label above may actually be RAM/IMC. Prove memory (RAM/IMC) first.");
+        }
+        if (wheaCoreSeen)
+            Console.WriteLine("[WHEA] A PROCESSOR-domain machine check was logged -> corroborates a CPU-core fault.");
+        if (!anyWheaSeen)
+        {
+            Console.WriteLine("[WHEA] No hardware-error events were logged.");
+            Console.WriteLine("       -> On non-ECC DDR5 this does NOT clear memory: DRAM corruption often never reaches WHEA.");
+            Console.WriteLine("          Absence of WHEA = inconclusive for RAM/IMC, not proof it is fine.");
+        }
+    }
+
     if (instCount == 0)
         Console.WriteLine("-> No problem found. Run longer (--cycles/--seconds), try --single for high-boost CO, or stronger --yc-tests.");
     Native.timeEndPeriod(1);

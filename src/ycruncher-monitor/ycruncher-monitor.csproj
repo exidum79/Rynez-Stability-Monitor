@@ -14,4 +14,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Read WHEA hardware-error events from the Windows Event Log (System.Diagnostics.Eventing.Reader) -->
+    <PackageReference Include="System.Diagnostics.EventLog" Version="8.0.0" />
+  </ItemGroup>
+
 </Project>
