@@ -16,24 +16,33 @@ public sealed record WheaEvent(
 /// Reads Microsoft-Windows-WHEA-Logger events from the Windows System event log and classifies
 /// each as a MEMORY/IMC vs CPU-CORE vs PCIe/platform hardware error.
 ///
-/// This is the "hardware-level attribution" complement to the symptom-level detectors: the CPU's
-/// Machine Check Architecture (MCA) records which unit faulted in a per-bank fashion. On AMD AM5
-/// (Zen 4/5), MCA banks 16/17 are the UMC (Unified Memory Controller) - those, plus the dedicated
-/// memory-error event IDs, mean the fault is in the RAM/IMC domain, not the CPU core.
+/// Classification is driven by the error record itself, not by hardcoded bank numbers:
+///   1. Primary  - parse the raw UEFI CPER record (the "RawData" blob) and read each section's
+///                 SectionType GUID. Memory / processor / PCIe section GUIDs are vendor- and
+///                 machine-independent (defined by UEFI), so this works regardless of how many
+///                 cores / memory channels / PCIe slots a system has.
+///   2. Fallback - when no CPER blob is present (e.g. the translated "memory error" events), use
+///                 the OS-defined event ID, which already encodes memory vs processor vs PCIe.
+/// The MCA bank number is only used as a cosmetic unit hint in the summary, never to decide memory
+/// vs core.
 ///
-/// Hard caveat (non-ECC DDR5): a "DRAM ECC error" only reaches host MCA/WHEA when ECC is active.
-/// On consumer non-ECC DDR5 a RAM-overclock fault is usually silently on-die-corrected or just
-/// corrupts/reboots, so it never appears here. Absence of WHEA memory events does NOT clear memory.
+/// Hard caveat (non-ECC DDR5): a DRAM error only reaches host MCA/WHEA when reportable ECC is
+/// active. Consumer non-ECC DDR5 only has silent on-die ECC, so a RAM-overclock fault is corrected
+/// invisibly or just corrupts/reboots and never appears here. Absence of WHEA memory events does
+/// NOT clear memory; that needs ECC DIMMs on an ECC-reporting board.
 /// </summary>
 public sealed class WheaReader
 {
-    // AMD Zen MCA bank -> rough unit name. Bank 16/17 = UMC is the MEMORY domain on mainstream
-    // AM4/AM5 desktop (2 memory controllers); Threadripper/EPYC have more UMCs on different banks,
-    // and Intel numbers banks differently. So this bank->memory shortcut is a SECONDARY hint - the
-    // primary, vendor-neutral memory signal is the dedicated memory event IDs (22/23/46/47/48/49),
-    // which Windows decodes regardless of platform. The event IDs and field names themselves come
-    // from the OS WHEA provider, so they are identical across machines (they do not scale with the
-    // CPU/RAM/PCIe count); only the field VALUES differ, and we read those by name.
+    // UEFI CPER section-type GUIDs (machine-independent).
+    private static readonly Guid SecMemory  = new("a5bc1114-6f64-4ede-b863-3e83ed7c83b1");
+    private static readonly Guid SecMemory2 = new("61ec04fc-48e6-d813-25c9-8daa44750b12");
+    private static readonly Guid SecProcGen = new("9876ccad-47b4-4bdb-b65e-16f193c4f3db");
+    private static readonly Guid SecProcX64 = new("dc3ea0b0-a144-4797-b95b-53fa242b6e1d");
+    private static readonly Guid SecPcie    = new("d995e954-bbc1-430f-ad91-b44dcb3c6f35");
+    private static readonly Guid SecPciBus  = new("c5753963-3b84-4095-bf78-eddad3f9c9dd");
+    private static readonly Guid SecPciDev  = new("eb5e4685-ca66-4769-b6a2-26068b001326");
+
+    // Cosmetic AMD Zen MCA bank -> unit hint for the summary ONLY. Does not drive classification.
     private static readonly Dictionary<int, string> ZenBankHint = new()
     {
         [0] = "LS (load/store)", [1] = "IF (instruction fetch)", [2] = "L2", [3] = "DE (decode)",
@@ -98,35 +107,71 @@ public sealed class WheaReader
         int? apic = TryInt(d, "ApicId");
         bool corrected = rec.Level == 3 /*Warning*/ || id is 17 or 19 or 21 or 23 or 25 or 27 or 41 or 43 or 45 or 47 or 49 or 2;
 
-        WheaDomain domain;
-        string? unit = null;
+        // 1) Primary: classify from the raw CPER record's section GUIDs.
+        WheaDomain domain = WheaDomain.Unknown;
+        byte[]? raw = GetBytes(d, "RawData");
+        if (raw != null) domain = ClassifyFromCper(raw);
+
+        // 2) Fallback: OS-defined event ID (covers events with no CPER blob, e.g. 48/49).
+        if (domain == WheaDomain.Unknown)
+            domain = id switch
+            {
+                22 or 23 or 46 or 47 or 48 or 49 => WheaDomain.MemoryImc,
+                18 or 19 or 20 or 21 => (bank is 16 or 17) ? WheaDomain.MemoryImc : WheaDomain.CpuCore,
+                16 or 17 or 40 or 41 or 24 or 25 or 26 or 27 or 42 or 43 or 44 or 45 => WheaDomain.PciePlatform,
+                _ => WheaDomain.Unknown,
+            };
+
+        string? unit;
         string summary;
-        switch (id)
+        switch (domain)
         {
-            case 22: case 23: case 46: case 47: // platform memory error (decoded DRAM: rank/bank/row/col)
-            case 48: case 49:                   // memory error (UMC)
-                domain = WheaDomain.MemoryImc;
+            case WheaDomain.MemoryImc:
                 unit = "DRAM/UMC";
                 summary = MemorySummary(d);
                 break;
-            case 18: case 19: case 20: case 21: // processor machine-check (x64)
-                if (bank is 16 or 17) { domain = WheaDomain.MemoryImc; unit = ZenBankHint.GetValueOrDefault(bank.Value, "UMC"); }
-                else { domain = WheaDomain.CpuCore; unit = bank is int b ? ZenBankHint.GetValueOrDefault(b, $"core/cache (bank {b})") : "core/cache"; }
+            case WheaDomain.CpuCore:
+                unit = bank is int b ? ZenBankHint.GetValueOrDefault(b, $"core/cache (bank {b})") : "core/cache";
                 summary = ProcSummary(d, bank, apic, unit);
                 break;
-            case 16: case 17: case 40: case 41:                   // PCI Express
-            case 24: case 25: case 42: case 43:                   // PCI/PCI-X bus
-            case 26: case 27: case 44: case 45:                   // PCI device
-                domain = WheaDomain.PciePlatform;
+            case WheaDomain.PciePlatform:
                 unit = "PCIe/IO";
                 summary = $"PCIe/IO hardware error (event {id})";
                 break;
             default:
-                domain = WheaDomain.Unknown;
+                unit = null;
                 summary = $"WHEA event {id}";
                 break;
         }
         return new WheaEvent(t, rid, id, domain, corrected, bank, unit, apic, summary);
+    }
+
+    /// <summary>Parse a UEFI CPER record and return the domain from its section-type GUIDs.</summary>
+    private static WheaDomain ClassifyFromCper(byte[] b)
+    {
+        try
+        {
+            if (b.Length < 128) return WheaDomain.Unknown;
+            if (b[0] != (byte)'C' || b[1] != (byte)'P' || b[2] != (byte)'E' || b[3] != (byte)'R') return WheaDomain.Unknown;
+            int sectionCount = BitConverter.ToUInt16(b, 0x0A);
+            if (sectionCount <= 0 || sectionCount > 64) return WheaDomain.Unknown;
+            bool mem = false, proc = false, pcie = false;
+            for (int i = 0; i < sectionCount; i++)
+            {
+                int desc = 128 + i * 72;            // 72-byte section descriptor
+                if (desc + 72 > b.Length) break;
+                var g = new Guid(b.AsSpan(desc + 0x10, 16)); // SectionType GUID at descriptor offset 0x10
+                if (g == SecMemory || g == SecMemory2) mem = true;
+                else if (g == SecProcGen || g == SecProcX64) proc = true;
+                else if (g == SecPcie || g == SecPciBus || g == SecPciDev) pcie = true;
+            }
+            // Memory is the most specific attribution we care about, then processor, then PCIe.
+            if (mem) return WheaDomain.MemoryImc;
+            if (proc) return WheaDomain.CpuCore;
+            if (pcie) return WheaDomain.PciePlatform;
+        }
+        catch { /* malformed blob -> let the caller fall back to the event ID */ }
+        return WheaDomain.Unknown;
     }
 
     private static string ProcSummary(Dictionary<string, string> d, int? bank, int? apic, string? unit)
@@ -181,5 +226,24 @@ public sealed class WheaReader
         }
         catch { }
         return null;
+    }
+
+    /// <summary>Decode a hex-text field (e.g. the CPER "RawData" blob) into bytes.</summary>
+    private static byte[]? GetBytes(Dictionary<string, string> d, string key)
+    {
+        if (!d.TryGetValue(key, out var v) || string.IsNullOrWhiteSpace(v)) return null;
+        var hex = new System.Text.StringBuilder(v.Length);
+        foreach (char c in v)
+            if (Uri.IsHexDigit(c)) hex.Append(c);
+        if (hex.Length < 2) return null;
+        int n = hex.Length / 2;
+        var bytes = new byte[n];
+        try
+        {
+            for (int i = 0; i < n; i++)
+                bytes[i] = (byte)((Uri.FromHex(hex[i * 2]) << 4) | Uri.FromHex(hex[i * 2 + 1]));
+        }
+        catch { return null; }
+        return bytes;
     }
 }

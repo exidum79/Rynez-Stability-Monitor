@@ -92,15 +92,18 @@ confined.
    died**. On the next launch the tool reads it and flags the prime suspect.
 5. **WHEA hardware-error attribution** (on by default) — reads the CPU's **Machine
    Check Architecture (MCA)** via the Windows event log (`Microsoft-Windows-WHEA-Logger`)
-   and classifies each hardware error by domain: a **memory/IMC** error (a UMC bank
-   — MCA bank 16/17 on AM5 — or a decoded DRAM ECC error) vs a **CPU-core** machine
-   check vs **PCIe/IO**. This is the only signal here that separates RAM/IMC from the
-   core at the **hardware** level. Disable with `--no-whea`.
-   ⚠️ **Non-ECC DDR5 caveat:** a DRAM error only reaches WHEA when ECC is active. On
-   consumer non-ECC memory a RAM-overclock fault is usually silently on-die-corrected
-   or just corrupts/reboots, so it **never appears here** — *absence of WHEA memory
-   events does not clear memory.* True hardware memory attribution needs **ECC UDIMMs
-   on an ECC-capable board**.
+   and classifies each hardware error by domain: **memory/IMC** vs **CPU-core** vs
+   **PCIe/IO**. Classification is driven by the **UEFI CPER error record's section-type
+   GUIDs** (parsed from the raw event), *not* by hardcoded bank numbers — so it adapts
+   to any core / channel / slot count; the MCA bank is only a cosmetic unit hint. This
+   is the only signal here that separates RAM/IMC from the core at the **hardware**
+   level. Disable with `--no-whea`.
+   ⚠️ **Non-ECC DDR5 caveat:** a DRAM error only reaches WHEA when **reportable ECC** is
+   active. Consumer DDR5 only has silent **on-die ECC**, so a RAM-overclock fault is
+   corrected invisibly or just corrupts/reboots and **never appears here** — *absence of
+   WHEA memory events does not clear memory.* Reportable memory attribution needs **ECC
+   DIMMs on an ECC-reporting board** (an ECC UDIMM on a supporting AM5 board, or server
+   RDIMMs); plain consumer non-ECC kits cannot be tracked.
 6. **Permanent CSV log** — every event is appended to
    `dist/logs/rynez_<timestamp>.csv` (timestamp, source, core, detail, …). The
    Windows Event Log rotates and gets purged; this file stays.
@@ -161,30 +164,31 @@ Use the test type as a probe: **compute-heavy / low-memory** tests isolate the
 ### Hardware-level attribution (WHEA / MCA)
 
 The closest thing to *true* separation is reading the CPU's **Machine Check
-Architecture** directly. AMD Zen records errors per hardware unit in separate MCA
-**banks**: banks **16/17 are the UMC** (Unified Memory Controller) → the **RAM/IMC**
-domain, while the **core/cache** banks (LS, L2, L3, …) are the **core/CO** domain.
-Windows surfaces the same MCA data through **WHEA** (`Microsoft-Windows-WHEA-Logger`),
-split into memory vs processor errors. This tool reads those events and tags each as
-`RAM/IMC`, `CPU-CORE`, or `PCIe/IO` (detector #5 above).
+Architecture** directly. Windows surfaces MCA data through **WHEA**
+(`Microsoft-Windows-WHEA-Logger`). This tool reads each event's raw **UEFI CPER**
+record and classifies it by the **section-type GUID** (memory / processor / PCIe) —
+a vendor- and machine-independent identifier — so the `RAM/IMC` vs `CPU-CORE` vs
+`PCIe/IO` tag does **not** depend on hardcoded bank numbers and adapts to any
+core / memory-channel / slot count. The MCA bank (e.g. UMC vs LS/L2/L3) is shown only
+as a cosmetic unit hint. Events with no CPER blob fall back to the OS-defined event ID.
 
 Two hard limits keep this from being a silver bullet — and they are the industry
 consensus, not this tool's shortcomings:
 
-- **Non-ECC DDR5:** MCA only reports a DRAM error when **ECC is active**. On consumer
-  non-ECC memory a RAM-OC fault is silently on-die-corrected or just corrupts/reboots,
-  so it never reaches WHEA. Real hardware memory attribution needs **ECC UDIMMs on an
-  ECC-capable board**.
+- **Non-ECC DDR5:** MCA only reports a DRAM error when **reportable ECC** is active.
+  Consumer DDR5 ships with mandatory **on-die ECC**, but that corrects silently *inside
+  the chip* and is never reported to the host — so a RAM-OC fault is fixed invisibly or
+  just corrupts/reboots and never reaches WHEA. Reportable attribution needs **ECC DIMMs
+  on an ECC-reporting board** (ECC UDIMM on a supporting AM5 board, or server RDIMMs);
+  a plain consumer non-ECC kit cannot be tracked.
 - **APIC-ID → core mapping** for a processor WHEA event is best-effort; the reliable
   part is the **domain** (memory vs core), not the exact core number.
 
-> Portability note: the WHEA **event IDs and field names come from the Windows OS
-> provider**, so they are the same on every x64 machine and do **not** change with your
-> CPU / RAM-bank / PCIe-slot count — only the field *values* do, and the reader reads
-> them by name. The one platform assumption is `bank 16/17 = UMC`, which holds on
-> mainstream **AM4/AM5 desktop** Ryzen (2 memory controllers); Threadripper/EPYC and
-> Intel differ there, but the dedicated memory event IDs still classify memory errors
-> correctly regardless.
+> Portability note: the WHEA **event IDs, field names, and CPER section GUIDs come from
+> the Windows OS / UEFI spec**, so they are the same on every x64 machine and do **not**
+> change with your CPU / RAM-bank / PCIe-slot count — only the field *values* do. Because
+> classification is now GUID-driven (not bank-number-driven), it works across vendors and
+> platforms; the bank number is shown only as a cosmetic hint.
 
 Industry research reaches the same place — without a vendor's internal test structures
 you can observe *which* core miscomputed but generally **cannot prove root cause** from
@@ -270,6 +274,12 @@ The easiest way is the batch files (they auto-request Administrator):
   ```
   Use this to **soak one suspect core continuously** (e.g. the core that failed
   before) instead of splitting the night across all cores.
+- **`full-test (RAM-IMC + CPU-CO).bat`** — the **full battery** in one go:
+  Phase 1 all-core memory-coupled load (**RAM / IMC** + load vdroop), then Phase 2
+  single-core high-boost sweep (**CPU core / CO**). WHEA tags each error RAM/IMC vs
+  CPU-core as it runs; the battery **stops on the first detected problem**. Cycles per
+  phase are editable at the top. (y-cruncher is not a substitute for a dedicated RAM
+  tester — pair with TM5 / Karhu / MemTest86 for deep memory coverage.)
 
 Or run the executable directly (path depends on your layout — the package root
 for a downloaded release, or `dist\` for a source build):

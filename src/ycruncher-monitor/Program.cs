@@ -380,6 +380,7 @@ finally
 
     if (instCount == 0)
         Console.WriteLine("-> No problem found. Run longer (--cycles/--seconds), try --single for high-boost CO, or stronger --yc-tests.");
+    Environment.ExitCode = instCount > 0 ? 1 : 0; // let a batch battery stop on the first detected problem
     Native.timeEndPeriod(1);
     shutdownDone.Set(); // release the window-close handler if it is waiting on us
 }
