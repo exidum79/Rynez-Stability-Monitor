@@ -274,6 +274,10 @@ The easiest way is the batch files (they auto-request Administrator):
   ```
   Use this to **soak one suspect core continuously** (e.g. the core that failed
   before) instead of splitting the night across all cores.
+- **`mem-test (RAM-IMC).bat`** — **RAM / IMC only**: all-core, memory-coupled tests
+  with a large memory footprint, looping. Edit `MEM` at the top to most of your free
+  RAM for the heaviest memory stress. WHEA tags a memory fault `RAM/IMC`. (Still pair
+  with TM5 / Karhu / MemTest86 — y-cruncher is not a dedicated memory tester.)
 - **`full-test (RAM-IMC + CPU-CO).bat`** — the **full battery** in one go:
   Phase 1 all-core memory-coupled load (**RAM / IMC** + load vdroop), then Phase 2
   single-core high-boost sweep (**CPU core / CO**). WHEA tags each error RAM/IMC vs
