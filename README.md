@@ -152,10 +152,19 @@ For a no-runtime-needed build, add `--self-contained true` (larger output).
 
 ## Run
 
-The easiest way is the two batch files (they auto-request Administrator):
+The easiest way is the batch files (they auto-request Administrator):
 
 - **`y-cruncher-monitor (all-core).bat`** — all-core diagnosis.
-- **`core-cycler (single-core).bat`** — single-core (high-boost) diagnosis.
+- **`core-cycler (single-core).bat`** — single-core (high-boost) diagnosis, sweeps every core.
+- **`core-cycler (pick cores).bat`** — single-core on **only the core(s) you choose**.
+  Open it in Notepad and edit one line near the top:
+  ```bat
+  set "CORES=0"        rem one core
+  set "CORES=0,2,5"    rem several cores (comma, no spaces)
+  set "CORES="         rem blank = sweep every core
+  ```
+  Use this to **soak one suspect core continuously** (e.g. the core that failed
+  before) instead of splitting the night across all cores.
 
 Or run the executable directly (path depends on your layout — the package root
 for a downloaded release, or `dist\` for a source build):
@@ -163,6 +172,8 @@ for a downloaded release, or `dist\` for a source build):
 ```sh
 ycruncher-monitor.exe                            # all-core, loop until you stop / first error
 ycruncher-monitor.exe --single                   # single-core sweep over every core
+ycruncher-monitor.exe --core 0                   # single-core on ONLY core 0 (continuous soak)
+ycruncher-monitor.exe --cores 0,2,5              # single-core on ONLY cores 0, 2 and 5
 ```
 
 The `.bat` launchers find `ycruncher-monitor.exe` whether it sits next to them or
@@ -173,6 +184,8 @@ in a `dist\` subfolder, so both layouts work.
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `--single` | off | Single-core mode: pin one core at a time (high-boost CO testing). |
+| `--core N` | — | Single-core on **only** physical core N (implies `--single`). Continuous soak of one suspect core. |
+| `--cores 0,2,5` | — | Single-core on **only** the listed physical cores (comma-separated; implies `--single`). |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
 | `--stop-on N` | `1` | Stop after N problem events. `0` = never stop. |
@@ -201,6 +214,15 @@ two outcomes are not symmetric:
 The launchers default to `--cycles 0` (loop until an error or you stop), so they
 are built for long runs — just leave them going. Use a short pass only to move on
 to the next variable, never as a final "stable" verdict.
+
+**Single-core sweep divides your time across cores.** A full sweep tests one core
+at a time, so an overnight sweep gives each core only about `total ÷ core count`
+of cumulative high-boost time (e.g. 8 h on a 6-core ≈ 80 min per core, in
+rotating bursts). That rotation is the accepted CoreCycler-style method and adds
+useful boost/idle thermal cycling — but to give **one** core a true continuous
+soak, use `--core N` (or `core-cycler (pick cores).bat`) and let just that core
+run all night. The complementary **all-core** run instead soaks **every** core
+the whole time, in the low-frequency / high-current corner.
 
 ### Output & logs (in the `logs/` folder next to the exe)
 

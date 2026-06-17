@@ -32,12 +32,17 @@ Console.WriteLine();
 //        N63 (NTT integer path -> silent errors FFT misses), VT3 (memory-coupled).
 //        Valid tokens: BKT BBP SFTv4 SNT SVT FFTv4 NTT63 N63 VSTv3 VT3. --yc-mem 1.2G
 //   --no-hitch [--hitch-ms 15] : micro-freeze monitor is ON by default; --no-hitch turns it off.
+//   --core N       : single-core mode on ONLY physical core N (continuous soak of one suspect core).
+//   --cores 0,2,5  : single-core mode on ONLY the listed physical cores (comma-separated).
+//                    Both imply --single. With neither, single mode sweeps every core.
 bool single = args.Any(a => a.Equals("--single", StringComparison.OrdinalIgnoreCase));
 int perCoreSeconds = GetIntArg(args, "--seconds", 120);
 int cycles = GetIntArg(args, "--cycles", 0);
 int stopOn = GetIntArg(args, "--stop-on", 1);
 string ycTests = GetStrArg(args, "--yc-tests", "BKT FFTv4 N63 VT3");
 string ycMem = GetStrArg(args, "--yc-mem", ""); // empty = let y-cruncher auto-size (good for all-core)
+var coreSel = ParseCoreSelection(args);          // requested physical core indices (empty = all)
+if (coreSel.Count > 0) single = true;            // selecting cores only makes sense pinned -> force single-core
 
 string logDir = Path.Combine(AppContext.BaseDirectory, "logs");
 using var logger = new ErrorLogger(logDir);
@@ -85,10 +90,30 @@ if (!YCruncherRunner.Exists())
 }
 var ycRunner = new YCruncherRunner(logger, ycTests, ycMem, topo.CoreOfLogical, job);
 string memDesc = string.IsNullOrWhiteSpace(ycMem) ? "auto" : ycMem;
+
+// Resolve which physical cores single-core mode will test (default: all of them).
+var coresToTest = topo.Cores.ToList();
+if (single && coreSel.Count > 0)
+{
+    var invalid = coreSel.Where(i => i < 0 || i >= topo.Cores.Count).Distinct().ToList();
+    if (invalid.Count > 0)
+        Console.WriteLine($"  [!] ignoring out-of-range core(s): {string.Join(",", invalid)} (valid range 0..{topo.Cores.Count - 1})");
+    var valid = coreSel.Where(i => i >= 0 && i < topo.Cores.Count).Distinct().ToHashSet();
+    if (valid.Count == 0)
+    {
+        Console.WriteLine("  [!] no valid cores selected (--core/--cores) - nothing to test. Exiting.");
+        Native.timeEndPeriod(1);
+        return;
+    }
+    coresToTest = topo.Cores.Where(c => valid.Contains(c.Index)).ToList();
+}
+
 if (single)
 {
+    bool allCores = coresToTest.Count == topo.Cores.Count;
+    string coreList = allCores ? "every core" : $"core(s) {string.Join(",", coresToTest.Select(c => c.Index))}";
     Console.WriteLine($"  SINGLE-CORE mode: one core pinned at a time (high single-core boost), tests: {ycTests}, mem: {memDesc}");
-    Console.WriteLine($"  per core: one full pass of all tests, {(cycles == 0 ? "sweeping every core, looping until you stop / first error" : cycles + " sweep(s) over every core")}");
+    Console.WriteLine($"  testing {coreList}; per core one full pass of all tests, {(cycles == 0 ? "looping until you stop / first error" : cycles + " sweep(s)")}");
     Console.WriteLine("  Any error/micro-freeze on a pinned core is blamed on THAT core.");
 }
 else
@@ -223,7 +248,7 @@ try
         cycle++;
         if (single)
         {
-            foreach (var core in topo.Cores)
+            foreach (var core in coresToTest)
             {
                 if (cts.IsCancellationRequested) break;
                 runNo++;
@@ -309,6 +334,16 @@ static string GetStrArg(string[] args, string name, string fallback)
     for (int i = 0; i < args.Length - 1; i++)
         if (args[i].Equals(name, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
     return fallback;
+}
+// Collect requested physical-core indices from --cores 0,2,5 and/or --core N. Empty = test all cores.
+static List<int> ParseCoreSelection(string[] args)
+{
+    var list = new List<int>();
+    foreach (var tok in GetStrArg(args, "--cores", "").Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries))
+        if (int.TryParse(tok.Trim(), out int v)) list.Add(v);
+    int one = GetIntArg(args, "--core", -1);
+    if (one >= 0) list.Add(one);
+    return list;
 }
 
 sealed class CurrentCoreHolder
