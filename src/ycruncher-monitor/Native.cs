@@ -36,6 +36,25 @@ internal static class Native
         return unchecked((uint)Environment.TickCount - lii.dwTime); // both are GetTickCount-based; wrap-safe
     }
 
+    // Keep the system awake and the display on for the duration of a test, WITHOUT changing the user's
+    // power plan or screensaver settings. ES_DISPLAY_REQUIRED also suppresses the screensaver - which
+    // removes the screensaver / display-off micro-freeze false positives entirely. Cleared on exit.
+    [Flags]
+    private enum EXECUTION_STATE : uint
+    {
+        ES_CONTINUOUS = 0x80000000,
+        ES_SYSTEM_REQUIRED = 0x00000001,
+        ES_DISPLAY_REQUIRED = 0x00000002,
+    }
+    [DllImport("kernel32.dll")] private static extern EXECUTION_STATE SetThreadExecutionState(EXECUTION_STATE esFlags);
+
+    /// <summary>Block system sleep, display-off and the screensaver until <see cref="AllowSleep"/> (or exit).</summary>
+    public static void KeepSystemAndDisplayAwake() =>
+        SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS | EXECUTION_STATE.ES_SYSTEM_REQUIRED | EXECUTION_STATE.ES_DISPLAY_REQUIRED);
+
+    /// <summary>Restore normal power behaviour (release the keep-awake request).</summary>
+    public static void AllowSleep() => SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
+
     // GetLogicalProcessorInformation returns the system's core/cache/NUMA relationships.
     // We only need physical-core relationships (RelationProcessorCore = 0); each entry's ProcessorMask
     // is the bitmask of logical processors that belong to that physical core.

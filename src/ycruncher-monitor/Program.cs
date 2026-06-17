@@ -34,6 +34,8 @@ Console.WriteLine();
 //   --no-hitch [--hitch-ms 15] : micro-freeze monitor is ON by default; --no-hitch turns it off.
 //   --no-whea      : WHEA hardware-error reader is ON by default (classifies MCA errors as RAM/IMC
 //                    vs CPU core via the Windows event log); --no-whea turns it off.
+//   --allow-sleep  : by default the test keeps the display on and blocks sleep/screensaver (no power-plan
+//                    change, reverted on exit); --allow-sleep lets the system sleep / screensaver run.
 //   --core N       : single-core mode on ONLY physical core N (continuous soak of one suspect core).
 //   --cores 0,2,5  : single-core mode on ONLY the listed physical cores (comma-separated).
 //                    Both imply --single. With neither, single mode sweeps every core.
@@ -297,6 +299,17 @@ void PollWhea()
     }
 }
 
+// Keep the display on and block sleep/screensaver during the test (no power-plan change; reverted on exit).
+// This also removes screensaver / display-off micro-freeze false positives. You can still switch the
+// monitor off physically. --allow-sleep opts out.
+bool keepAwake = !args.Any(a => a.Equals("--allow-sleep", StringComparison.OrdinalIgnoreCase));
+if (keepAwake)
+{
+    Native.KeepSystemAndDisplayAwake();
+    Console.WriteLine("Keeping the display on + blocking sleep/screensaver for this run (no power-plan change).");
+    Console.WriteLine("You can switch the monitor OFF physically. (--allow-sleep to disable.)");
+}
+
 Console.WriteLine($"Starting (Ctrl+C to stop)...");
 Console.WriteLine("(Note: y-cruncher.exe shows ~0% in Task Manager - its child process (e.g. \"24-ZN5 ~ ...exe\") does the work.");
 Console.WriteLine(" Each run is silent except a progress tick every ~15s; an all-core pass takes a few minutes.)");
@@ -400,6 +413,7 @@ finally
     if (instCount == 0)
         Console.WriteLine("-> No problem found. Run longer (--cycles/--seconds), try --single for high-boost CO, or stronger --yc-tests.");
     Environment.ExitCode = instCount > 0 ? 1 : 0; // let a batch battery stop on the first detected problem
+    Native.AllowSleep(); // release the keep-awake request (restore normal sleep/screensaver behaviour)
     Native.timeEndPeriod(1);
     shutdownDone.Set(); // release the window-close handler if it is waiting on us
 }

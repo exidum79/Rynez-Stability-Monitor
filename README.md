@@ -38,11 +38,13 @@ permanent CSV log so the failing core is recorded even when Windows logs nothing
 > a supporting AM5 board**, or server **RDIMMs**. Consumer **non-ECC DDR5** has only silent
 > on-die ECC and **cannot be tracked**, so the absence of WHEA memory events never clears RAM.
 
-> **🖱️ Micro-freeze false positives:** the stutter detector flags **any** scheduling stall,
-> so normal activity — **app switching, screensavers, display power changes, video on a weaker
-> CPU** — can look like a hitch. Hitches within ~2 s of keyboard/mouse input are **auto-ignored
-> as environmental** (never blamed on a core). For a clean run, **disable the screensaver and
-> display-sleep and don't touch the PC**; tune with `--hitch-ms`, or turn it off with `--no-hitch`
+> **🖱️ Micro-freeze false positives — handled for you:** the stutter detector flags **any**
+> scheduling stall, so normal activity (app switching, screensavers, display power changes, video
+> on a weaker CPU) can look like a hitch. By **default the tool keeps the display on and blocks
+> sleep/screensaver for the run** (no power-plan change, reverted on exit — you can still switch the
+> monitor off physically), and it **auto-ignores hitches within ~2 s of keyboard/mouse input**. So
+> no manual setup each time; just don't run heavy foreground apps/video during the test. Opt out
+> with `--allow-sleep`; tune with `--hitch-ms` / `--no-hitch`
 > (see [Micro-freeze false positives](#micro-freeze-hitch-false-positives)).
 
 ---
@@ -346,6 +348,7 @@ in a `dist\` subfolder, so both layouts work.
 | `--no-hitch` | off | Turn the micro-freeze monitor off. |
 | `--hitch-ms N` | `15` | Micro-freeze threshold in milliseconds. |
 | `--no-whea` | off | Turn the WHEA hardware-error reader off (it is on by default). |
+| `--allow-sleep` | off | Allow system sleep / screensaver during the run. By default the tool keeps the **display on** and blocks sleep/screensaver (no power-plan change, reverted on exit). |
 
 **Default test selection** (`BKT FFTv4 N63 VT3`) is chosen to expose CO problems
 from several angles: `BKT` is the lightest (→ highest boost, exposes too-aggressive
@@ -378,12 +381,19 @@ including ones caused by normal OS activity, not your CO:
 - Weaker CPUs/iGPUs hit this more easily (e.g. browser + YouTube) because there is less
   scheduling headroom; a strong CPU may never see it from the same activity.
 
-To reduce noise, the monitor now **ignores any hitch within ~2 s of keyboard/mouse input**
-(logged as *environmental*, never blamed on a core) — so alt-tabbing or dismissing a
-screensaver won't be counted. What it can't auto-detect is an **idle animated screensaver**
-or **passive video playback** (no input involved), so for a clean run:
+The tool handles most of this for you:
 
-- **Disable the screensaver and display-sleep, and don't interact** with the machine.
+- **By default it keeps the display on and blocks sleep + the screensaver for the whole run**
+  (via `SetThreadExecutionState` — **no power-plan change**, reverted on exit). That removes the
+  screensaver / display-off false positives at the source. You can still switch the monitor
+  **off physically**. Opt out with `--allow-sleep`.
+- It also **ignores any hitch within ~2 s of keyboard/mouse input** (logged as *environmental*,
+  never blamed on a core) — so alt-tabbing or touching the PC won't be counted.
+
+So you no longer need to edit your power plan or screensaver settings each time. Remaining advice:
+
+- **Don't run heavy foreground apps / video** during a single-core test on a weak CPU, and don't
+  interact with it — let it sit idle under load.
 - A real CO fault shows as a hitch while the machine is **left idle under load**, or as a
   y-cruncher error / WHEA event / hard freeze — not a one-off blip when you touch the PC.
 - Still too noisy? Raise the threshold: `--hitch-ms 25` (or `30`), or disable it with `--no-hitch`.
