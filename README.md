@@ -38,6 +38,13 @@ permanent CSV log so the failing core is recorded even when Windows logs nothing
 > a supporting AM5 board**, or server **RDIMMs**. Consumer **non-ECC DDR5** has only silent
 > on-die ECC and **cannot be tracked**, so the absence of WHEA memory events never clears RAM.
 
+> **🖱️ Micro-freeze false positives:** the stutter detector flags **any** scheduling stall,
+> so normal activity — **app switching, screensavers, display power changes, video on a weaker
+> CPU** — can look like a hitch. Hitches within ~2 s of keyboard/mouse input are **auto-ignored
+> as environmental** (never blamed on a core). For a clean run, **disable the screensaver and
+> display-sleep and don't touch the PC**; tune with `--hitch-ms`, or turn it off with `--no-hitch`
+> (see [Micro-freeze false positives](#micro-freeze-hitch-false-positives)).
+
 ---
 
 ## Why this exists
