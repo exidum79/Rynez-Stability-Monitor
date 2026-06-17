@@ -248,12 +248,15 @@ redistributed here. Download it yourself from the official site:
 1. Get y-cruncher: **http://www.numberworld.org/y-cruncher/**
    Use the **latest version** — that is the version this tool was developed and
    tested against.
-2. Put its contents in the **`tools`** folder **next to `ycruncher-monitor.exe`**
-   so that **`tools\y-cruncher.exe`** exists. (If you built from source instead,
-   that folder is `dist/tools/` — see [`dist/tools/README.md`](dist/tools/README.md).)
+2. Extract its **whole folder** into **`tools`** (next to `ycruncher-monitor.exe`) so that
+   **both `tools\y-cruncher.exe` AND `tools\Binaries\` exist** — `Binaries\` holds the
+   per-architecture worker `.exe`s (e.g. `24-ZN5 ~ Komari.exe`) that do the real work.
+   **Do not copy only `y-cruncher.exe`** — by itself it is just a launcher and cannot
+   stress-test. (If you built from source, that folder is `dist/tools/` — see
+   [`dist/tools/README.md`](dist/tools/README.md).)
 
-The monitor refuses to start (with a download hint) if `y-cruncher.exe` is
-missing.
+The monitor refuses to start if `y-cruncher.exe` is missing, **or if `tools\Binaries\` is
+missing** (the "you extracted only the launcher" case) — with a clear message either way.
 
 ---
 

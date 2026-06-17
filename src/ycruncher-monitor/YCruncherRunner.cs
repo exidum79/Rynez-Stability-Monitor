@@ -41,6 +41,20 @@ public sealed class YCruncherRunner
     public static string DefaultExePath() => Path.Combine(AppContext.BaseDirectory, "tools", "y-cruncher.exe");
     public static bool Exists() => File.Exists(DefaultExePath());
 
+    /// <summary>Path to y-cruncher's Binaries folder (the per-architecture worker .exe files).</summary>
+    public static string BinariesDir() => Path.Combine(AppContext.BaseDirectory, "tools", "Binaries");
+
+    /// <summary>
+    /// True if the per-architecture worker binaries are present. y-cruncher.exe is only a launcher; the
+    /// real stress runs in a worker from tools\Binaries\ (e.g. "24-ZN5 ~ Komari.exe"). If a user extracted
+    /// ONLY y-cruncher.exe, this is false and the tool cannot actually stress-test.
+    /// </summary>
+    public static bool BinariesPresent()
+    {
+        try { return Directory.Exists(BinariesDir()) && Directory.EnumerateFiles(BinariesDir(), "*.exe").Any(); }
+        catch { return false; }
+    }
+
     /// <summary>Run y-cruncher stress on ALL cores for up to durationSeconds (full pass of all tests).</summary>
     public YcResult RunAllCore(int durationSeconds, CancellationToken token)
         => Run(durationSeconds, affinityMask: 0UL, token);

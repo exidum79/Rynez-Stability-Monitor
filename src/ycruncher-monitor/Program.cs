@@ -86,10 +86,26 @@ Console.WriteLine("[3/3] Engine: y-cruncher");
 if (!YCruncherRunner.Exists())
 {
     Console.WriteLine($"  y-cruncher.exe not found at {YCruncherRunner.DefaultExePath()}");
-    Console.WriteLine("  Download from http://www.numberworld.org/y-cruncher/ and put y-cruncher.exe in the tools\\ folder.");
+    Console.WriteLine("  Download from http://www.numberworld.org/y-cruncher/ and extract the WHOLE y-cruncher");
+    Console.WriteLine("  folder into tools\\ (you need both y-cruncher.exe AND its Binaries\\ subfolder).");
     Native.timeEndPeriod(1);
     return;
 }
+// y-cruncher.exe is only a launcher; the real worker lives in tools\Binaries\. If a user extracted ONLY
+// y-cruncher.exe, it cannot stress-test (it would launch, fail to find a worker, and look stuck/exit).
+// Catch that here with a clear explanation instead of letting it fail confusingly mid-run.
+if (!YCruncherRunner.BinariesPresent())
+{
+    Console.WriteLine("  [!] y-cruncher.exe is here, but its worker binaries are MISSING:");
+    Console.WriteLine($"      {YCruncherRunner.BinariesDir()}\\  (e.g. \"24-ZN5 ~ Komari.exe\")");
+    Console.WriteLine("      y-cruncher.exe is only a launcher - the actual stress runs in a child .exe from");
+    Console.WriteLine("      that Binaries\\ folder. It looks like you extracted ONLY y-cruncher.exe.");
+    Console.WriteLine("      Fix: extract the ENTIRE y-cruncher folder into tools\\ (keep its Binaries\\ folder,");
+    Console.WriteLine("      DLLs and other files together), then re-run. Download: http://www.numberworld.org/y-cruncher/");
+    Native.timeEndPeriod(1);
+    return;
+}
+Console.WriteLine("  y-cruncher.exe + Binaries\\ found.");
 var ycRunner = new YCruncherRunner(logger, ycTests, ycMem, topo.CoreOfLogical, job);
 string memDesc = string.IsNullOrWhiteSpace(ycMem) ? "auto" : ycMem;
 
