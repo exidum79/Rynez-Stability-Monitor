@@ -25,6 +25,8 @@ Console.WriteLine();
 //   --seconds N    : seconds per individual test (default 120; internally capped to 60s/test).
 //                    One run = a full pass of every test, so total run time scales with test count.
 //   --cycles  N    : passes (all-core: # of runs; single: # of full sweeps over every core). 0 = infinite.
+//   --minutes N    : total time limit - auto-stop cleanly after N minutes of wall time (default 0 = no limit).
+//                    The in-progress run is ended and counted as cancelled (NOT a fault).
 //   --stop-on N    : stop after N problem events (default 1 = stop on first). 0 = never stop.
 //   --yc-tests "BKT FFTv4 N63 VT3" : y-cruncher tests tuned for PBO Curve Optimizer hunting:
 //        BKT (lightest -> highest boost, exposes too-aggressive CO at high freq),
@@ -58,6 +60,7 @@ int burstMs = GetIntArg(args, "--burst-ms", 5);
 int idleMs = GetIntArg(args, "--idle-ms", 5);
 int perCoreSeconds = GetIntArg(args, "--seconds", 120);
 int cycles = GetIntArg(args, "--cycles", 0);
+int maxMinutes = GetIntArg(args, "--minutes", 0);
 int stopOn = GetIntArg(args, "--stop-on", 1);
 string ycTests = GetStrArg(args, "--yc-tests", "BKT FFTv4 N63 VT3");
 string ycMem = GetStrArg(args, "--yc-mem", ""); // empty = let y-cruncher auto-size (good for all-core)
@@ -340,6 +343,11 @@ if (keepAwake)
     Console.WriteLine("You can switch the monitor OFF physically. (--allow-sleep to disable.)");
 }
 
+if (maxMinutes > 0)
+{
+    cts.CancelAfter(TimeSpan.FromMinutes(maxMinutes)); // clean auto-stop; the in-progress run returns Cancelled
+    Console.WriteLine($"Time limit: auto-stop after {maxMinutes} minute(s).");
+}
 Console.WriteLine($"Starting (Ctrl+C to stop)...");
 Console.WriteLine("(Note: y-cruncher.exe shows ~0% in Task Manager - its child process (e.g. \"24-ZN5 ~ ...exe\") does the work.");
 Console.WriteLine(" Each run is silent except a progress tick every ~15s; an all-core pass takes a few minutes.)");
@@ -443,7 +451,12 @@ finally
     }
 
     if (instCount == 0)
-        Console.WriteLine("-> No problem found. Run longer (--cycles/--seconds), try --single for high-boost CO, or stronger --yc-tests.");
+    {
+        if (maxMinutes > 0 && totalSw.Elapsed.TotalMinutes >= maxMinutes - 1)
+            Console.WriteLine($"-> No problem found in the {maxMinutes}-minute run. (Stable for this window - a longer soak adds confidence.)");
+        else
+            Console.WriteLine("-> No problem found. Run longer (--cycles/--seconds/--minutes), try --single for high-boost CO, or stronger --yc-tests.");
+    }
     Environment.ExitCode = instCount > 0 ? 1 : 0; // let a batch battery stop on the first detected problem
     Native.AllowSleep(); // release the keep-awake request (restore normal sleep/screensaver behaviour)
     Native.timeEndPeriod(1);

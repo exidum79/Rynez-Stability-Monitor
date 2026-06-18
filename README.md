@@ -508,6 +508,8 @@ ycruncher-monitor.exe --transient                # transient boost-cycling sweep
 ycruncher-monitor.exe --transient --core 0 --burst-ms 5 --idle-ms 5   # transient soak of one core
 ycruncher-monitor.exe --transient --random       # real-world random load (utilisation wanders 0->100%)
 ycruncher-monitor.exe --transient --random --core 0   # real-world random soak of one core
+ycruncher-monitor.exe --core 0 --minutes 120     # soak core 0, auto-stop after 2 hours
+ycruncher-monitor.exe --minutes 120              # all-core, auto-stop after 2 hours
 ```
 
 The `.bat` launchers find `ycruncher-monitor.exe` whether it sits next to them or
@@ -526,6 +528,7 @@ in a `dist\` subfolder, so both layouts work.
 | `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
+| `--minutes N` | `0` | Total time limit — auto-stop cleanly after N minutes of wall time (`0` = no limit). The in-progress run is ended and counted as **cancelled, not a fault**. Handy for a fixed 2-hour soak. |
 | `--stop-on N` | `1` | Stop after N problem events. `0` = never stop. |
 | `--yc-tests "BKT FFTv4 N63 VT3"` | as shown | y-cruncher tests tuned for Curve Optimizer hunting (see below). |
 | `--yc-mem 1.2G` | auto | Memory size for y-cruncher. Empty = let it auto-size (good for all-core). |
