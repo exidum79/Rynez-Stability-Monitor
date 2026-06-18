@@ -63,6 +63,37 @@ failure to a specific physical core.
 
 ---
 
+## Why one tool can't catch every instability — what the research shows
+
+Large-scale field studies of CPUs land on the same uncomfortable result: a defective
+("mercurial") core miscomputes **only under specific conditions** — a particular instruction
+sequence, voltage, frequency, or temperature — and is silent the rest of the time. Google's
+*"Cores that don't count"* and Meta's *"Silent Data Corruptions at Scale"* both document errors
+that one workload triggers and another never does. There is **no single test pattern that
+exercises every fault**, because the faults themselves are pattern-dependent.
+
+Two consequences for desktop CO / PBO tuning:
+
+- **No one tool is "enough."** A memory tester, a compute self-checker (y-cruncher), a power-virus
+  (Prime95), and a boost-swing / transient probe each cover a **different regime**. Coverage comes
+  from **layering** them, not from crowning a winner — which is exactly why forum "tool X vs tool Y"
+  fights never resolve: they compare tools that test different things. (The table below maps which
+  tool covers which regime.)
+- **Clean root-cause needs hardware, not software.** IBM's z990 RAS design got trustworthy
+  attribution only via **lockstep dual-execution in silicon**. A software tool on a consumer board
+  can observe *which loaded core* misbehaved, but **cannot prove** RAM vs IMC vs core by itself — so
+  this tool is deliberately honest about being a *diagnostic*, not a verdict (see
+  [Attribution & limitations](#attribution--limitations-read-this)).
+
+On AMD specifically, Curve Optimizer / PBO instability is a **per-core, condition-dependent undervolt
+margin** problem (per AMD's own Curve Optimizer / Precision Boost Overdrive documentation) — which is
+why this tool hunts **per core** and across multiple regimes (steady single-core, all-core, and
+transient boost-swing) instead of with one blanket load.
+
+Full citations are in [References](#references).
+
+---
+
 ## Which stress engine — and is y-cruncher "enough"?
 
 The community argument ("**y-cruncher** is best" vs "no, **Prime95**" vs "**AIDA64**
@@ -308,13 +339,20 @@ consensus, not this tool's shortcomings:
 
 Industry research reaches the same place — without a vendor's internal test structures
 you can observe *which* core miscomputed but generally **cannot prove root cause** from
-one tool:
+one tool. See [References](#references) for the full list.
 
-- Hochschild et al., *“Cores that don't count”*, **HotOS 2021** (Google).
-- Dixit et al., *“Silent Data Corruptions at Scale”*, **2021** (Meta), arXiv:2102.11245.
-- Fair et al., *“RAS of the IBM eServer z990”*, **IBM J. R&D 2004** (lockstep / dual-execution = how clean attribution is actually done, in hardware).
+### References
+
+The same body of research backs both points made up top — **faults are condition-dependent**
+(so no single tool covers them all) and **clean attribution needs hardware**, not a software stress
+test:
+
+- Hochschild et al., *“Cores that don't count”*, **HotOS 2021** (Google) — mercurial cores miscompute only under specific conditions.
+- Dixit et al., *“Silent Data Corruptions at Scale”*, **2021** (Meta), arXiv:2102.11245 — SDC is workload- and condition-dependent at fleet scale.
+- Fair et al., *“RAS of the IBM eServer z990”*, **IBM J. R&D 2004** — lockstep / dual-execution = how clean attribution is actually done, in hardware.
 - Intel, *“Data Center Silent Data Errors”* (2024); Inkley & Mishaeli, *“Finding Faulty Components in a Live Fleet Environment”* (Intel, 2024).
 - Schroeder, Pinheiro & Weber, *“DRAM Errors in the Wild”*, **SIGMETRICS 2009** (Google field data).
+- AMD, **Precision Boost Overdrive & Curve Optimizer** documentation (AMD Ryzen / Ryzen Master technical docs) — defines CO as a **per-core, condition-dependent** voltage-offset margin; the vendor reference for *why* per-core, multi-regime hunting is the right approach (no public AMD SDC paper exists — this is vendor documentation, not a study).
 
 ---
 
