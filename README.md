@@ -167,6 +167,22 @@ in more idle→load swings per second but get jittery as they approach the timer
 idle gap should stay long enough (a few ms) for the core to actually drop its clock between
 bursts. Launch it with **`core-cycler (transient boost).bat`**.
 
+> **Needs the Balanced power plan.** The swing only develops if the clock is *allowed to
+> drop* during the idle gap. On **High performance** (or any plan with **Minimum processor
+> state = 100%**) the core stays pinned near its ceiling, so the suspend/resume cycles do
+> almost nothing — there is no idle→boost transition left to stress. Use **Balanced** with
+> **Minimum processor state ≈ 5%** so the clock falls in the idle gap and gets yanked back
+> to full boost on each burst. This matters most for the **max-shake** launcher below.
+
+For a one-click setup there are two **core-0** transient launchers (no editing needed):
+**`core-cycler (core0 transient).bat`** (default `5/5` duty, pinned to core 0) and
+**`core-cycler (core0 max-shake).bat`** (`2/3` duty — the idle gap is long enough for the
+clock+voltage to genuinely drop, then the short burst yanks it to full boost, giving the
+**deepest idle→full-boost swing** that pops CO undervolts). Both require the **Balanced**
+plan above to do anything; going below ~1–2 ms is pointless (Windows `Sleep` floors at
+~1 ms and the clock/voltage ramp itself takes ~1–2 ms, so shorter just blurs into a
+mid-clock instead of a full swing).
+
 ### The detectors
 
 1. **y-cruncher self-check** — y-cruncher verifies its own math; a mismatch is a
@@ -314,6 +330,8 @@ one tool:
      core-cycler (single-core).bat
      core-cycler (pick cores).bat
      core-cycler (transient boost).bat
+     core-cycler (core0 transient).bat
+     core-cycler (core0 max-shake).bat
      mem-test (RAM-IMC).bat
      full-test (RAM-IMC + CPU-CO).bat
      tools\            <- put y-cruncher here
@@ -399,6 +417,13 @@ The easiest way is the batch files (they auto-request Administrator):
   `IDLE` (ms) and optionally `CORES` at the top. **Honest limit:** Windows timing is
   ~0.5–2 ms (not sub-ms) — a complement to the steady runs, not a sub-ms tester (see
   [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
+- **`core-cycler (core0 transient).bat`** — the same transient mode **hard-pinned to core 0**
+  (default `5/5` duty), so you can soak core 0 with no editing.
+- **`core-cycler (core0 max-shake).bat`** — core 0 transient tuned for the **biggest clock
+  swing** (`2/3` duty: the deepest idle→full-boost transition, the one that pops CO
+  undervolts). ⚠️ **Only works on the Balanced power plan** (Minimum processor state ≈ 5%);
+  on High performance / min-state 100% the clock never drops in the idle gap, so there is no
+  swing to stress (see [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
 - **`mem-test (RAM-IMC).bat`** — **RAM / IMC only**: all-core, memory-coupled tests
   with a large memory footprint, looping. Edit `MEM` at the top to most of your free
   RAM for the heaviest memory stress. WHEA tags a memory fault `RAM/IMC`. (Still pair
