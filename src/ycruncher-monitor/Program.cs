@@ -289,6 +289,10 @@ void HandleResult(YcResult r, int pinnedCore)
 void CheckSlowdown(double durationSec, YcResult r, int pinnedCore)
 {
     if (r.Outcome != YcOutcome.Completed) return;
+    // --random duty-cycles the worker for a RANDOM fraction of each run, so wall-time varies run-to-run by
+    // design - a longer run just means more idle stretches this time, not a fault. Skip the slowdown check
+    // (fixed transient keeps a constant duty ratio, so its wall-time stays consistent and the check is valid).
+    if (randomDuty) return;
     if (runDurations.Count >= 3)
     {
         double avg = runDurations.Average();
