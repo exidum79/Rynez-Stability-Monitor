@@ -77,10 +77,10 @@ public sealed class YCruncherRunner
     /// NOTE: Windows timer granularity is ~0.5-2ms, NOT sub-ms - this approximates transient stress; it
     /// does not match a Linux sub-ms tool. It surfaces more transient exposure than steady load, no more.
     /// </summary>
-    public YcResult RunTransient(ulong affinityMask, int durationSeconds, int burstMs, int idleMs, CancellationToken token)
-        => Run(durationSeconds, affinityMask, token, Math.Max(1, burstMs), Math.Max(1, idleMs));
+    public YcResult RunTransient(ulong affinityMask, int durationSeconds, int burstMs, int idleMs, bool randomDuty, CancellationToken token)
+        => Run(durationSeconds, affinityMask, token, Math.Max(1, burstMs), Math.Max(1, idleMs), randomDuty);
 
-    private YcResult Run(int durationSeconds, ulong affinityMask, CancellationToken token, int burstMs = 0, int idleMs = 0)
+    private YcResult Run(int durationSeconds, ulong affinityMask, CancellationToken token, int burstMs = 0, int idleMs = 0, bool randomDuty = false)
     {
         string exe = DefaultExePath();
         if (!File.Exists(exe)) return new(YcOutcome.NotFound, "y-cruncher.exe not found in tools\\", -1);
@@ -130,7 +130,7 @@ public sealed class YCruncherRunner
         Thread? dutyThread = null;
         if (burstMs > 0)
         {
-            dutyThread = new Thread(() => DutyCycleWorker(proc, burstMs, idleMs, token))
+            dutyThread = new Thread(() => DutyCycleWorker(proc, burstMs, idleMs, randomDuty, token))
             { IsBackground = true, Priority = ThreadPriority.Highest, Name = "transient-duty" };
             dutyThread.Start();
         }
@@ -177,7 +177,7 @@ public sealed class YCruncherRunner
     // for burstMs (core ramps to boost), suspend it for idleMs (core drops clock), repeat. Pinned to one
     // core, this produces the rapid boost swings a steady 100% load never does. y-cruncher's self-check is
     // untouched - suspend/resume is transparent to it - so a silent compute error is still detected.
-    private void DutyCycleWorker(Process launcher, int burstMs, int idleMs, CancellationToken token)
+    private void DutyCycleWorker(Process launcher, int burstMs, int idleMs, bool randomDuty, CancellationToken token)
     {
         Process? worker = FindWorkerChild(token);
         if (worker == null)
@@ -192,15 +192,60 @@ public sealed class YCruncherRunner
             worker.Dispose();
             return;
         }
+        bool Running() => !token.IsCancellationRequested && !SafeHasExited(launcher) && !SafeHasExited(worker);
+        var rng = new Random();
         try
         {
-            while (!token.IsCancellationRequested && !SafeHasExited(launcher) && !SafeHasExited(worker))
+            if (!randomDuty)
             {
-                Thread.Sleep(burstMs);                          // load burst: worker runs, core ramps up
-                if (token.IsCancellationRequested || SafeHasExited(worker)) break;
-                Native.SuspendProcess(h);                       // idle gap: core drops its clock
-                Thread.Sleep(idleMs);
-                Native.ResumeProcess(h);                        // next load burst -> boost ramp again
+                // Fixed metronome: exact burstMs load / idleMs idle, every cycle.
+                while (Running())
+                {
+                    Thread.Sleep(burstMs);                      // load burst: worker runs, core ramps up
+                    if (!Running()) break;
+                    Native.SuspendProcess(h);                   // idle gap: core drops its clock
+                    Thread.Sleep(idleMs);
+                    Native.ResumeProcess(h);                    // next load burst -> boost ramp again
+                }
+            }
+            else
+            {
+                // Two-level random (real-world-like). Each PHASE lasts a random 80..2000ms at a random TARGET
+                // load fraction 0..1, delivered by fast ~10ms micro-duty. Because a phase is on the order of /
+                // longer than Task Manager's ~1s sample window, the reported utilisation actually wanders the
+                // full 0->100% range like real use: idle stretches (clock fully drops), full-load stretches,
+                // and partial stretches with fast idle->boost edges. burstMs/idleMs are ignored in this mode.
+                const int phaseMinMs = 80, phaseMaxMs = 2000, periodMs = 10;
+                var phaseSw = new Stopwatch();
+                while (Running())
+                {
+                    int phaseMs = rng.Next(phaseMinMs, phaseMaxMs + 1);
+                    double target = rng.NextDouble();           // 0 = idle phase, 1 = full-load phase
+                    phaseSw.Restart();
+                    if (target <= 0.05)                         // idle stretch: hold suspended -> ~0%
+                    {
+                        Native.SuspendProcess(h);
+                        while (phaseSw.ElapsedMilliseconds < phaseMs && Running()) Thread.Sleep(periodMs);
+                        Native.ResumeProcess(h);
+                    }
+                    else if (target >= 0.95)                    // full-load stretch: hold resumed -> ~100%
+                    {
+                        while (phaseSw.ElapsedMilliseconds < phaseMs && Running()) Thread.Sleep(periodMs);
+                    }
+                    else                                        // partial load: fast micro-duty at this level
+                    {
+                        int burst = Math.Max(1, (int)Math.Round(periodMs * target));
+                        int idle  = Math.Max(1, periodMs - burst);
+                        while (phaseSw.ElapsedMilliseconds < phaseMs && Running())
+                        {
+                            Thread.Sleep(burst);                // load slice: core ramps up
+                            if (!Running()) break;
+                            Native.SuspendProcess(h);           // idle slice: core drops clock
+                            Thread.Sleep(idle);
+                            Native.ResumeProcess(h);
+                        }
+                    }
+                }
             }
         }
         finally

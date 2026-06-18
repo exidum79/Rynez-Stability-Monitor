@@ -19,6 +19,9 @@ dist/tools/*
 # Internal planning notes
 모니터_개발계획서.md
 
+# Personal / local-only launchers (not shipped) - my own per-core convenience .bat files
+my-launchers/
+
 # OS / editor cruft
 Thumbs.db
 .vs/

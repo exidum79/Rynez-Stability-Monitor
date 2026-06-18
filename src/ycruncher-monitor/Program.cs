@@ -44,10 +44,16 @@ Console.WriteLine();
 //                    boost swings (not on steady load). Implies --single. Tune --burst-ms / --idle-ms.
 //                    Windows timer granularity is ~0.5-2ms (NOT sub-ms): it adds transient exposure, it
 //                    does not match a Linux sub-ms tool.
-//   --burst-ms N   : transient load-burst length in ms (default 5).
-//   --idle-ms  N   : transient idle-gap length in ms (default 5).
+//   --burst-ms N   : transient load-burst length in ms (default 5). With --random, the MAX of the range.
+//   --idle-ms  N   : transient idle-gap length in ms (default 5). With --random, the MAX of the range.
+//   --random       : real-world-like load. Instead of a fixed metronome, run random PHASES (each a random
+//                    80-2000ms at a random 0-100% target load, delivered by fast ~10ms micro-duty), so the
+//                    core's utilisation actually wanders the whole 0->100% range like real use - idle
+//                    stretches, full-load stretches, and partial stretches with fast idle->boost edges.
+//                    Sweeps many transition timings in one run. burst-ms/idle-ms are ignored in this mode.
 bool single = args.Any(a => a.Equals("--single", StringComparison.OrdinalIgnoreCase));
 bool transient = args.Any(a => a.Equals("--transient", StringComparison.OrdinalIgnoreCase));
+bool randomDuty = args.Any(a => a.Equals("--random", StringComparison.OrdinalIgnoreCase));
 int burstMs = GetIntArg(args, "--burst-ms", 5);
 int idleMs = GetIntArg(args, "--idle-ms", 5);
 int perCoreSeconds = GetIntArg(args, "--seconds", 120);
@@ -148,7 +154,10 @@ if (single)
     Console.WriteLine($"  testing {coreList}; per core one full pass of all tests, {(cycles == 0 ? "looping until you stop / first error" : cycles + " sweep(s)")}");
     if (transient)
     {
-        Console.WriteLine($"  worker duty-cycled {burstMs}ms load / {idleMs}ms idle -> the core ramps idle->load repeatedly (boost swings a steady load misses).");
+        if (randomDuty)
+            Console.WriteLine("  worker duty-cycled in RANDOM real-world mode (random 80-2000ms phases at random 0-100% load) -> utilisation wanders the full 0->100% range like real use, sweeping many idle->boost timings.");
+        else
+            Console.WriteLine($"  worker duty-cycled {burstMs}ms load / {idleMs}ms idle -> the core ramps idle->load repeatedly (boost swings a steady load misses).");
         Console.WriteLine("    note: Windows timer granularity is ~0.5-2ms, NOT sub-ms - this adds transient exposure, it does not match a Linux sub-ms tool.");
     }
     Console.WriteLine("  Any error/micro-freeze on a pinned core is blamed on THAT core.");
@@ -349,7 +358,7 @@ try
 
                 var sw = Stopwatch.StartNew();
                 var r = transient
-                    ? ycRunner.RunTransient(core.Mask, perCoreSeconds, burstMs, idleMs, cts.Token)
+                    ? ycRunner.RunTransient(core.Mask, perCoreSeconds, burstMs, idleMs, randomDuty, cts.Token)
                     : ycRunner.RunSingleCore(core.Mask, perCoreSeconds, cts.Token);
                 sw.Stop();
                 HandleResult(r, core.Index);

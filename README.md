@@ -214,6 +214,23 @@ plan above to do anything; going below ~1–2 ms is pointless (Windows `Sleep` f
 ~1 ms and the clock/voltage ramp itself takes ~1–2 ms, so shorter just blurs into a
 mid-clock instead of a full swing).
 
+#### Real-world random mode (`--random`)
+
+A fixed `burst/idle` metronome holds the core at one *average* load — over Task Manager's
+~1 s sample window the hundreds of ms-scale cycles average out, so the utilisation graph
+sits at a flat band and looks nothing like real use. **`--random`** fixes that: instead of a
+metronome it runs random **phases** — each a random **80–2000 ms** stretch at a random
+**0–100 % target load** (delivered by fast ~10 ms micro-duty). Because a phase is on the
+order of (or longer than) the sample window, the reported utilisation actually **wanders the
+full 0→100 % range like real-world use**: idle stretches (the clock fully drops), full-load
+stretches, and partial stretches with fast idle→boost edges. As a bonus, a phase boundary
+from a ~0 % idle stretch straight into a ~100 % stretch is the **deepest possible
+idle→full-load step**, the hardest Vmin transient of all. It exercises CO faults across many
+load levels and transition timings in a single run rather than betting on one fixed swing
+(`--burst-ms` / `--idle-ms` are ignored in this mode). Launch it with
+**`core-cycler (transient random).bat`** (edit `CORES` to target specific cores, or leave it
+blank to sweep all). Same **Balanced** power-plan requirement applies.
+
 ### The detectors
 
 1. **y-cruncher self-check** — y-cruncher verifies its own math; a mismatch is a
@@ -370,6 +387,7 @@ test:
      core-cycler (transient boost).bat
      core-cycler (core0 transient).bat
      core-cycler (core0 max-shake).bat
+     core-cycler (transient random).bat
      mem-test (RAM-IMC).bat
      full-test (RAM-IMC + CPU-CO).bat
      tools\            <- put y-cruncher here
@@ -462,6 +480,11 @@ The easiest way is the batch files (they auto-request Administrator):
   undervolts). ⚠️ **Only works on the Balanced power plan** (Minimum processor state ≈ 5%);
   on High performance / min-state 100% the clock never drops in the idle gap, so there is no
   swing to stress (see [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
+- **`core-cycler (transient random).bat`** — **real-world random** transient: random
+  80–2000 ms phases at random 0–100% load, so the core's utilisation **wanders the full
+  0→100% range like real use** (not a flat metronome band) and hits many load levels /
+  transition timings in one run. Edit `CORES` at the top (blank = sweep all). Same Balanced
+  plan requirement (see [Real-world random mode](#real-world-random-mode---random)).
 - **`mem-test (RAM-IMC).bat`** — **RAM / IMC only**: all-core, memory-coupled tests
   with a large memory footprint, looping. Edit `MEM` at the top to most of your free
   RAM for the heaviest memory stress. WHEA tags a memory fault `RAM/IMC`. (Still pair
@@ -483,6 +506,8 @@ ycruncher-monitor.exe --core 0                   # single-core on ONLY core 0 (c
 ycruncher-monitor.exe --cores 0,2,5              # single-core on ONLY cores 0, 2 and 5
 ycruncher-monitor.exe --transient                # transient boost-cycling sweep (idle->load swings)
 ycruncher-monitor.exe --transient --core 0 --burst-ms 5 --idle-ms 5   # transient soak of one core
+ycruncher-monitor.exe --transient --random       # real-world random load (utilisation wanders 0->100%)
+ycruncher-monitor.exe --transient --random --core 0   # real-world random soak of one core
 ```
 
 The `.bat` launchers find `ycruncher-monitor.exe` whether it sits next to them or
@@ -496,8 +521,9 @@ in a `dist\` subfolder, so both layouts work.
 | `--core N` | — | Single-core on **only** physical core N (implies `--single`). Continuous soak of one suspect core. |
 | `--cores 0,2,5` | — | Single-core on **only** the listed physical cores (comma-separated; implies `--single`). |
 | `--transient` | off | Transient / boost-cycling: single-core **plus** duty-cycling the worker (suspend/resume) so the core ramps idle→load repeatedly — exposes CO faults that only show on rapid boost swings. Implies `--single`. ~0.5–2 ms granularity (not sub-ms). |
-| `--burst-ms N` | `5` | Transient load-burst length (ms) — how long the worker runs each cycle. |
-| `--idle-ms N` | `5` | Transient idle-gap length (ms) — how long the worker is suspended each cycle (lets the core drop its clock). |
+| `--burst-ms N` | `5` | Transient load-burst length (ms) — how long the worker runs each cycle. Ignored with `--random`. |
+| `--idle-ms N` | `5` | Transient idle-gap length (ms) — how long the worker is suspended each cycle (lets the core drop its clock). Ignored with `--random`. |
+| `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
 | `--stop-on N` | `1` | Stop after N problem events. `0` = never stop. |
