@@ -63,6 +63,59 @@ failure to a specific physical core.
 
 ---
 
+## Which stress engine — and is y-cruncher "enough"?
+
+The community argument ("**y-cruncher** is best" vs "no, **Prime95**" vs "**AIDA64**
+is more realistic") asks the wrong question. These tools are **not competitors that
+rank**; they each stress a **different instability regime**, and each catches faults
+the others miss. That is *why* people disagree — they are testing different things.
+
+| Engine | What it actually stresses | What it's best at | Blind spot |
+|--------|---------------------------|-------------------|------------|
+| **y-cruncher** | Heavy AVX-512 + large-memory math **with a built-in result self-check** | **Silent compute errors** — it *proves* the math came out wrong, not just "it crashed." On Zen 4/5 the AVX-512 path also pulls near-max current/heat. The standard for **Curve Optimizer / per-core** hunting. | Not a dedicated memory tester; absolute worst-case power is marginally below Prime95 Small-FFT. |
+| **Prime95 (Small FFT)** | A **power-virus** — maximum sustained current and heat | **Thermals, Vdroop, VRM / power-delivery** limits — the hottest, highest-current corner. | Doesn't *verify* results the way y-cruncher does, so a marginal silent error can slip; weak per-core attribution. |
+| **AIDA64** | A lighter **combined** CPU+FPU+cache+memory load | A "closer to real-world", run-it-for-hours soak; quick combined sanity. | The **loosest** of the three — marginal CO/undervolt faults often pass it. Not conclusive for tight tuning. |
+
+### Why this tool drives y-cruncher
+
+The failure mode this tool exists to chase — **Curve Optimizer / PBO undervolt
+instability** — is most often a **silent wrong calculation**, not a clean crash.
+Only y-cruncher **checks its own result every run**, so it is the one engine that
+turns "the machine *might* be miscomputing" into a logged, attributable error. On
+Zen 4/5 its AVX-512 worker also drives current and heat hard enough to expose load
+Vdroop, so for **CO/PBO core hunting it is the right engine, not a compromise.**
+
+So for **what this tool is for, y-cruncher is enough — and arguably the best choice.**
+What the tool *adds on top* is the part y-cruncher alone doesn't give you: **per-core
+attribution**, the **micro-freeze monitor**, the **reboot-surviving crash breadcrumb**,
+**WHEA/MCA** hardware tagging, and the **permanent CSV log** (see [How it works](#how-it-works)).
+
+### Where y-cruncher (and therefore this tool) is *not* enough
+
+Being honest about the gaps — these are real, and they are **regimes y-cruncher was
+never meant to own**, not weaknesses of this tool:
+
+- **Deep RAM stability.** y-cruncher's memory-coupled tests pressure the **IMC** well,
+  but it is **not a dedicated memory tester**. Pair it with **TM5 / Karhu / MemTest86**
+  for real DRAM coverage — and remember consumer **non-ECC DDR5 can't even be tracked
+  by WHEA** (see [Attribution & limitations](#attribution--limitations-read-this)).
+  This is already called out in the `mem-test` / `full-test` launchers.
+- **Absolute worst-case power/thermal.** If your question is specifically "does my VRM /
+  cooling survive the hottest possible load," a **Prime95 Small-FFT** pass pushes a touch
+  higher than y-cruncher. Use it as a one-off thermal ceiling check.
+- **Sub-millisecond transient.** The `--transient` mode adds boost-swing stress, but
+  Windows timing is ~0.5–2 ms — not a Linux sub-ms tool (see
+  [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
+
+> **Bottom line for the forum debate:** don't pick one — **layer them**. Use a dedicated
+> memory tester (TM5/Karhu) to **prove RAM/IMC first**, this tool's **y-cruncher single-core
+> mode** to hunt the unstable **Curve Optimizer core**, and (optionally) a short **Prime95
+> Small-FFT** run for the thermal/power ceiling. They're not rivals; they cover different
+> ground. For the job this tool does — *which core is unstable under CO/PBO* — y-cruncher
+> is the correct engine.
+
+---
+
 ## How it works
 
 ### Test modes
