@@ -388,6 +388,7 @@ test:
      core-cycler (core0 transient).bat
      core-cycler (core0 max-shake).bat
      core-cycler (transient random).bat
+     core-cycler (single test).bat
      mem-test (RAM-IMC).bat
      full-test (RAM-IMC + CPU-CO).bat
      tools\            <- put y-cruncher here
@@ -485,6 +486,10 @@ The easiest way is the batch files (they auto-request Administrator):
   0→100% range like real use** (not a flat metronome band) and hits many load levels /
   transition timings in one run. Edit `CORES` at the top (blank = sweep all). Same Balanced
   plan requirement (see [Real-world random mode](#real-world-random-mode---random)).
+- **`core-cycler (single test).bat`** — runs **only the y-cruncher test(s) you pick**
+  (default **VT3**), single-core. Use it when your CPU **crashes reliably on one test** and
+  you want to skip the rest for faster reproduction. Edit `TESTS` (e.g. `VT3`, or `VT3 N63`)
+  and `CORES` at the top. The ~15 s progress tick shows which test is running.
 - **`mem-test (RAM-IMC).bat`** — **RAM / IMC only**: all-core, memory-coupled tests
   with a large memory footprint, looping. Edit `MEM` at the top to most of your free
   RAM for the heaviest memory stress. WHEA tags a memory fault `RAM/IMC`. (Still pair
@@ -510,6 +515,7 @@ ycruncher-monitor.exe --transient --random       # real-world random load (utili
 ycruncher-monitor.exe --transient --random --core 0   # real-world random soak of one core
 ycruncher-monitor.exe --core 0 --minutes 120     # soak core 0, auto-stop after 2 hours
 ycruncher-monitor.exe --minutes 120              # all-core, auto-stop after 2 hours
+ycruncher-monitor.exe --single --yc-tests VT3    # run ONLY VT3 (skip the other tests)
 ```
 
 The `.bat` launchers find `ycruncher-monitor.exe` whether it sits next to them or
