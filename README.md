@@ -262,11 +262,16 @@ blank to sweep all). Same **Balanced** power-plan requirement applies.
    droop — stands out and, if it persists, is logged as a `SLOWDOWN`. This is the most
    game-relevant signal: real gaming load is bursty like `--random`, and a marginal CO
    core's failure there is often a silent stutter / FPS drop, not a crash.
-   ⚠️ With no temperature sensor it **cannot tell CO clock-stretching from ordinary
-   thermal throttling**; the trailing baseline deliberately **absorbs very gradual
-   decline** (it targets abrupt stretch, not slow creep); and the isolated probe's
-   current draw is lighter than the real AVX-512 load — so it is a degradation
-   *indicator*, not proof of instability.
+   ⚠️ **Low confidence — treat a `SLOWDOWN` as a hint to investigate, never as a
+   verdict.** With no temperature sensor it **cannot tell CO clock-stretching from
+   ordinary thermal throttling**; the trailing baseline deliberately **absorbs very
+   gradual decline** (it targets abrupt stretch, not slow creep); and the isolated
+   probe's current draw is lighter than the real AVX-512 load. On top of that,
+   **`--random` load is irregular by nature, so a clean baseline is hard to pin down
+   and the probe cannot be precisely calibrated** — on the author's own machine, **even
+   up to 2 consecutive flags turned out to be false positives on a stable / stock
+   config** (which is why the default `--slow-persist 3` is recommended; lower values
+   over-report). Use this signal only as a rough pointer, not proof a core is bad.
 4. **Reboot-surviving crash breadcrumb** — every second the tool overwrites a tiny
    `lastalive.txt` with the timestamp and the core currently under test. If an
    uncorrectable error reboots the machine instantly, after reboot that file holds
@@ -551,7 +556,7 @@ in a `dist\` subfolder, so both layouts work.
 | `--idle-ms N` | `5` | Transient idle-gap length (ms) — how long the worker is suspended each cycle (lets the core drop its clock). Ignored with `--random`. |
 | `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. Also turns on the fixed-work **silent-slowdown probe** (see detector #3). |
 | `--slow-pct N` | `5` | `--random` silent-slowdown threshold: flag when the probe runs ≥ N% slower than its baseline. Lower = more sensitive but more thermal / boost-variance false positives. |
-| `--slow-persist N` | `3` | Consecutive slow probes (~10 s apart) required before a `SLOWDOWN` is logged. **Use ≥ 2** — `--slow-persist 1` fires on a single momentary boost/heat blip and so reports the occasional false positive **even on a stable / stock config**. Requiring 2+ in a row filters that out. |
+| `--slow-persist N` | `3` | Consecutive slow probes (~10 s apart) required before a `SLOWDOWN` is logged. **Keep the default 3** — on the author's machine even `--slow-persist 2` produced false positives on a stable / stock config (random load is hard to baseline cleanly), and `1` fires on a single momentary blip. Lower values over-report; this is a low-confidence, reference-only signal. |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
 | `--minutes N` | `0` | Total time limit — auto-stop cleanly after N minutes of wall time (`0` = no limit). The in-progress run is ended and counted as **cancelled, not a fault**. Handy for a fixed 2-hour soak. |
