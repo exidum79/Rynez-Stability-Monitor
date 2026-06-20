@@ -65,6 +65,23 @@ internal static class Native
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr h);
     private const uint PROCESS_SUSPEND_RESUME = 0x0800;
 
+    // Pin the CALLING thread to a set of logical processors. The random-mode performance probe uses this:
+    // it must run its fixed-work timing kernel ON the physical core under test (so what it measures is THAT
+    // core's clock), so it briefly pins the duty thread to the core's logical-processor mask, measures, then
+    // restores the previous affinity. SetThreadAffinityMask returns the thread's PREVIOUS mask (0 = failure).
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentThread();
+    [DllImport("kernel32.dll")] private static extern UIntPtr SetThreadAffinityMask(IntPtr hThread, UIntPtr dwThreadAffinityMask);
+
+    /// <summary>Pin the CURRENT OS thread to <paramref name="mask"/>. Returns the previous affinity mask
+    /// (0 on failure) to hand back to <see cref="RestoreThreadAffinity"/>.</summary>
+    public static ulong PinCurrentThread(ulong mask) => (ulong)SetThreadAffinityMask(GetCurrentThread(), (UIntPtr)mask);
+
+    /// <summary>Restore a thread affinity previously captured from <see cref="PinCurrentThread"/> (no-op if 0).</summary>
+    public static void RestoreThreadAffinity(ulong previousMask)
+    {
+        if (previousMask != 0) SetThreadAffinityMask(GetCurrentThread(), (UIntPtr)previousMask);
+    }
+
     /// <summary>Open a handle to a process with suspend/resume rights (IntPtr.Zero on failure).</summary>
     public static IntPtr OpenForSuspendResume(int pid) => OpenProcess(PROCESS_SUSPEND_RESUME, false, pid);
     /// <summary>Freeze every thread of the process (no-op on a null handle).</summary>

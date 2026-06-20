@@ -53,11 +53,19 @@ Console.WriteLine();
 //                    core's utilisation actually wanders the whole 0->100% range like real use - idle
 //                    stretches, full-load stretches, and partial stretches with fast idle->boost edges.
 //                    Sweeps many transition timings in one run. burst-ms/idle-ms are ignored in this mode.
+//                    Silent-slowdown detection: a fixed-work AVX2-FMA probe runs on the pinned core every
+//                    ~10s to catch clock stretching / throttling (the per-run wall-time check can't, since
+//                    random wall-time varies by design). It cannot tell CO clock-stretch from thermal throttle.
+//   --slow-pct N   : --random slowdown threshold - flag when the probe is >= N% slower than its baseline
+//                    (default 5). Lower = more sensitive but more thermal/boost-variance false positives.
+//   --slow-persist N : consecutive slow probes (~10s apart) required before logging a SLOWDOWN (default 3).
 bool single = args.Any(a => a.Equals("--single", StringComparison.OrdinalIgnoreCase));
 bool transient = args.Any(a => a.Equals("--transient", StringComparison.OrdinalIgnoreCase));
 bool randomDuty = args.Any(a => a.Equals("--random", StringComparison.OrdinalIgnoreCase));
 int burstMs = GetIntArg(args, "--burst-ms", 5);
 int idleMs = GetIntArg(args, "--idle-ms", 5);
+double slowPct = GetIntArg(args, "--slow-pct", 5);       // --random silent-slowdown threshold (% slower than baseline)
+int slowPersist = GetIntArg(args, "--slow-persist", 3);  // consecutive slow probes required before flagging
 int perCoreSeconds = GetIntArg(args, "--seconds", 120);
 int cycles = GetIntArg(args, "--cycles", 0);
 int maxMinutes = GetIntArg(args, "--minutes", 0);
@@ -293,8 +301,10 @@ void CheckSlowdown(double durationSec, YcResult r, int pinnedCore)
 {
     if (r.Outcome != YcOutcome.Completed) return;
     // --random duty-cycles the worker for a RANDOM fraction of each run, so wall-time varies run-to-run by
-    // design - a longer run just means more idle stretches this time, not a fault. Skip the slowdown check
-    // (fixed transient keeps a constant duty ratio, so its wall-time stays consistent and the check is valid).
+    // design - a longer run just means more idle stretches this time, not a fault. Skip this per-run check;
+    // random mode gets its own silent-slowdown detection instead (PerfProbe: a fixed-work clock-stretch probe
+    // run on the pinned core every ~10s, which IS duty-independent). Fixed transient keeps a constant duty
+    // ratio, so its wall-time stays consistent and this check is valid.
     if (randomDuty) return;
     if (runDurations.Count >= 3)
     {
@@ -370,7 +380,7 @@ try
 
                 var sw = Stopwatch.StartNew();
                 var r = transient
-                    ? ycRunner.RunTransient(core.Mask, perCoreSeconds, burstMs, idleMs, randomDuty, cts.Token)
+                    ? ycRunner.RunTransient(core.Mask, perCoreSeconds, burstMs, idleMs, randomDuty, cts.Token, core.Index, slowPct, slowPersist)
                     : ycRunner.RunSingleCore(core.Mask, perCoreSeconds, cts.Token);
                 sw.Stop();
                 HandleResult(r, core.Index);

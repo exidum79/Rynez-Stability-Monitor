@@ -154,7 +154,7 @@ never meant to own**, not weaknesses of this tool:
 | Mode | What it does | What it catches |
 |------|--------------|-----------------|
 | **All-core** (default) | y-cruncher self-pins across **every** core (heavy AVX-512 + large memory). | Load-line / Vdroop and thermal-regime instability. On an error, the failing logical core from y-cruncher's own message is mapped to a physical core. |
-| **Single-core** (`--single`) | y-cruncher is confined to **one physical core at a time** via a Windows **Job Object affinity mask**, so that core boosts to its **single-core ceiling**. | Curve Optimizer instability in the **high-boost / light-load** regime that all-core testing hides (see "[My experience](#my-experience-author-notes)"). The core under test is known because *we* pinned it, so any error or freeze is blamed on it. |
+| **Single-core** (`--single`) | y-cruncher is confined to **one physical core at a time** via a Windows **Job Object affinity mask**, so that core boosts to its **single-core ceiling**. | Curve Optimizer instability in the **high-boost / light-load** regime that all-core testing hides (see [Recommended workflow](#recommended-workflow)). The core under test is known because *we* pinned it, so any error or freeze is blamed on it. |
 | **Transient** (`--transient`) | Single-core **plus** the worker is **duty-cycled** — suspended for `--idle-ms`, resumed for `--burst-ms`, repeatedly — so the pinned core **ramps idle→load over and over** instead of holding a steady clock. | Curve Optimizer faults that only show on **rapid boost-clock swings (the transient regime)**, which a steady 100% load never triggers. y-cruncher's own math self-check still runs, so silent compute errors are still caught. **Honest limit:** Windows timer granularity is ~0.5–2 ms (**not** sub-ms), so it adds real transient exposure over steady load but does **not** match a Linux sub-ms tool — treat it as a *complement* to the other two modes (see [Transient / boost-cycling mode](#transient--boost-cycling-mode)). |
 
 Single-core confinement is done purely by a **Job Object affinity limit** (plus a
@@ -249,6 +249,18 @@ blank to sweep all). Same **Balanced** power-plan requirement applies.
    the running average, the machine spent time **not executing** (clock
    stretching / throttling / stalls) — recorded as a `SLOWDOWN` event. No sensors
    required.
+   In **`--random`** mode wall-time varies by design (the worker is duty-cycled a
+   *random* fraction each run), so that check is replaced by a **fixed-work probe**:
+   every ~10 s it briefly suspends the worker and times a **constant AVX2-FMA kernel**
+   (identical instruction count every time) pinned to the core under test. Fixed work
+   means the time depends only on the core's effective throughput, so a silent
+   **clock-stretch / throttle** shows up as the probe running measurably slower than the
+   baseline locked from the first several probes — logged as a `SLOWDOWN`. This is the
+   most game-relevant signal: real gaming load is bursty like `--random`, and a marginal
+   CO core's failure there is often a silent stutter / FPS drop, not a crash.
+   ⚠️ With no temperature sensor it **cannot tell CO clock-stretching from ordinary
+   thermal throttling**, and the isolated probe's current draw is lighter than the real
+   AVX-512 load — so it is a degradation *indicator*, not proof of instability.
 4. **Reboot-surviving crash breadcrumb** — every second the tool overwrites a tiny
    `lastalive.txt` with the timestamp and the core currently under test. If an
    uncorrectable error reboots the machine instantly, after reboot that file holds
@@ -531,7 +543,9 @@ in a `dist\` subfolder, so both layouts work.
 | `--transient` | off | Transient / boost-cycling: single-core **plus** duty-cycling the worker (suspend/resume) so the core ramps idle→load repeatedly — exposes CO faults that only show on rapid boost swings. Implies `--single`. ~0.5–2 ms granularity (not sub-ms). |
 | `--burst-ms N` | `5` | Transient load-burst length (ms) — how long the worker runs each cycle. Ignored with `--random`. |
 | `--idle-ms N` | `5` | Transient idle-gap length (ms) — how long the worker is suspended each cycle (lets the core drop its clock). Ignored with `--random`. |
-| `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. |
+| `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. Also turns on the fixed-work **silent-slowdown probe** (see detector #3). |
+| `--slow-pct N` | `5` | `--random` silent-slowdown threshold: flag when the probe runs ≥ N% slower than its baseline. Lower = more sensitive but more thermal / boost-variance false positives. |
+| `--slow-persist N` | `3` | Consecutive slow probes (~10 s apart) required before a `SLOWDOWN` is logged. |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
 | `--minutes N` | `0` | Total time limit — auto-stop cleanly after N minutes of wall time (`0` = no limit). The in-progress run is ended and counted as **cancelled, not a fault**. Handy for a fixed 2-hour soak. |
@@ -625,34 +639,32 @@ BIOS before changing a per-core Curve Optimizer value.
 
 ---
 
-## My experience (author notes)
+## Recommended workflow
 
-This is what the tool was built to chase, in case it helps you read your own
-results:
+CO instability hides in **different regimes**, so verify in this order — each
+stage catches what the previous one can't. Don't stop early.
 
-- I started at **CO −30** and ran **all-core** mode, bumping the suspect core's
-  offset **+1 at a time**.
-- All-core ran **10+ minutes with no error** — looked stable. But switching to
-  **single-core** mode, it **caught an error**.
-- My read: in all-core, per-core **power limits**, **thermal contention** and
-  **power/current contention** keep clocks from boosting high, so the instability
-  that **only shows up at high single-core boost** stays hidden. Single-core mode
-  lets one core boost to its ceiling and surfaces it.
-- Earlier, on a **tuned Windows + RAM overclock**, I couldn't tell *what* was
-  actually at fault — raising the CO value still produced errors.
-- Now on a **clean/stock Windows with no overclock**, things seem **much more
-  stable at lower CO values**.
-- Caveat: I haven't yet done real-world light-load usage (e.g. lighter games), so
-  **real-world stability is still unproven** — a stress pass is a strong signal,
-  not a guarantee.
-- My memory is plain consumer DDR5 with only **on-die ECC** (which corrects silently and
-  is never reported to WHEA), so a RAM/IMC fault could never be cleanly attributed here.
-  Because of that I'm **keeping RAM at stock — no memory overclock.** That takes memory
-  out of the equation and keeps the per-core Curve Optimizer result trustworthy. If I ever
-  want real RAM/IMC attribution, that needs ECC memory on an ECC-reporting board.
+1. **Per-core first, at single-core 100% boost.** Pin one core at a time so it
+   boosts to its **single-core ceiling**, where high-boost / light-load CO faults
+   surface fastest. Two ways:
+   - **Targeted:** `--core N` (or `core-cycler (pick cores).bat`) soaks one specific
+     suspect core continuously — the fastest route to a verdict on that core.
+   - **Sweep:** plain `--single` (or `core-cycler`) rotates through **every** core.
+     More thorough, but it **divides your time across cores, so it takes longer**
+     to give each core meaningful soak time.
+2. **Then always run an all-core verification.** Once the per-core stage looks
+   clean you **must** confirm with an all-core run — it loads every core together
+   in the **low-frequency / high-current / high-heat** corner (load Vdroop), which
+   exposes faults that single-core boost never triggers. **Do not skip this:** a
+   per-core pass on its own is not a clean bill of health.
+3. **Finally, a random verification.** End with `--transient --random` to validate
+   under real-world **bursty, game-like load** — variable utilisation, idle→boost
+   transients, plus the silent-slowdown probe. This is the closest stage to actual
+   use.
 
-Takeaway: **don't trust an all-core "pass" alone.** Re-test in single-core mode,
-and isolate variables (overclock vs. RAM OC vs. CO) one at a time.
+A short **FAIL** at any stage is conclusive — that core is unstable, done. A short
+**PASS** is not: trust a stage only after **hours** of clean run (see
+[How long to run](#how-long-to-run)).
 
 ---
 
@@ -664,6 +676,12 @@ positives). Newest first:
 
 | Version | What was added | Feedback / reason it exists |
 |---------|----------------|-----------------------------|
+| **v1.9.0** | **Random-mode silent-slowdown probe**: in `--random`, a fixed-work AVX2-FMA probe runs on the pinned core every ~10 s and flags **clock stretching / throttling** the per-run wall-time check can't see (tunable via `--slow-pct` / `--slow-persist`). | Random/game-like load is where silent slowdown matters most (stutter / FPS drop with no crash), but its wall-time varies by design — so a duty-independent probe was needed. Honest limit: with no temp sensor it **can't separate CO clock-stretch from thermal throttle**. |
+| **v1.8.0** | **Single-test launcher** — run only one chosen y-cruncher test (e.g. `VT3`). | Isolate a specific failure path instead of always running the full battery. |
+| **v1.7.0** | **Total time-limit mode** (`--minutes`): auto-stop cleanly after N minutes (the in-progress run is counted as cancelled, not a fault). | One-click fixed-length soaks (e.g. a 2-hour run) without watching the clock. |
+| **v1.6.1** | **Fix:** skip the silent-slowdown check in `--random` mode. | Random duty-cycling makes wall-time vary by design, so the per-run check fired **false** performance-drop events. (v1.9.0 later adds a proper duty-independent probe.) |
+| **v1.6.0** | **Real-world random transient mode** (`--random`): random 80–2000 ms phases at random 0–100 % load, so utilisation **wanders the full 0→100 % range** like real use. | A fixed metronome holds one average load; real workloads don't. This sweeps many load levels / idle→boost timings in one run. |
+| **v1.5.0** | **Transient launchers** (boost-cycling + max-shake). | One-click access to the new transient mode without typing flags. |
 | **v1.4.0** | **Transient / boost-cycling mode** (`--transient`): pins one core *and* duty-cycles the worker (suspend/resume) so it ramps **idle→load repeatedly**, exposing CO faults that only show on rapid boost swings. | *"A steady 100% load won't find low-load / transient instability."* Correct — so this targets the transient regime directly. Honest about the limit: Windows timing is ~0.5–2 ms (**not** sub-ms), so it's a **complement** to the steady runs, not a Linux sub-ms tool. |
 | **v1.3.1** | Keeps the **display on + blocks sleep/screensaver** during a test (no power-plan change, reverted on exit). | Screensaver / display-off were a source of micro-freeze false positives — removed at the source. |
 | **v1.3.0** | **Ignores micro-freezes within ~2 s of keyboard/mouse input** (logged as environmental, never blamed on a core). | Normal interaction (alt-tab, dismissing a screensaver) was being flagged as a hitch. |
