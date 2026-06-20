@@ -545,7 +545,7 @@ in a `dist\` subfolder, so both layouts work.
 | `--idle-ms N` | `5` | Transient idle-gap length (ms) — how long the worker is suspended each cycle (lets the core drop its clock). Ignored with `--random`. |
 | `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. Also turns on the fixed-work **silent-slowdown probe** (see detector #3). |
 | `--slow-pct N` | `5` | `--random` silent-slowdown threshold: flag when the probe runs ≥ N% slower than its baseline. Lower = more sensitive but more thermal / boost-variance false positives. |
-| `--slow-persist N` | `3` | Consecutive slow probes (~10 s apart) required before a `SLOWDOWN` is logged. |
+| `--slow-persist N` | `3` | Consecutive slow probes (~10 s apart) required before a `SLOWDOWN` is logged. **Use ≥ 2** — `--slow-persist 1` fires on a single momentary boost/heat blip and so reports the occasional false positive **even on a stable / stock config**. Requiring 2+ in a row filters that out. |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
 | `--minutes N` | `0` | Total time limit — auto-stop cleanly after N minutes of wall time (`0` = no limit). The in-progress run is ended and counted as **cancelled, not a fault**. Handy for a fixed 2-hour soak. |
