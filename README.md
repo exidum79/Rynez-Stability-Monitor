@@ -252,15 +252,21 @@ blank to sweep all). Same **Balanced** power-plan requirement applies.
    In **`--random`** mode wall-time varies by design (the worker is duty-cycled a
    *random* fraction each run), so that check is replaced by a **fixed-work probe**:
    every ~10 s it briefly suspends the worker and times a **constant AVX2-FMA kernel**
-   (identical instruction count every time) pinned to the core under test. Fixed work
-   means the time depends only on the core's effective throughput, so a silent
-   **clock-stretch / throttle** shows up as the probe running measurably slower than the
-   baseline locked from the first several probes — logged as a `SLOWDOWN`. This is the
-   most game-relevant signal: real gaming load is bursty like `--random`, and a marginal
-   CO core's failure there is often a silent stutter / FPS drop, not a crash.
+   (identical instruction count every time) pinned to the core under test. A short
+   fixed warm-up first guarantees the core is at full boost when timed, and the probe
+   takes the **best of several reps** to reject scheduler noise. Fixed work means the
+   time depends only on the core's effective throughput. Each probe is compared to the
+   **median of the recent probe window** (a *trailing* baseline, not a cold-start one):
+   a slowly-warming core drifts the whole window with it, so **steady-state heat is not
+   flagged**, while an **abrupt** drop — the signature of clock-stretch kicking in under
+   droop — stands out and, if it persists, is logged as a `SLOWDOWN`. This is the most
+   game-relevant signal: real gaming load is bursty like `--random`, and a marginal CO
+   core's failure there is often a silent stutter / FPS drop, not a crash.
    ⚠️ With no temperature sensor it **cannot tell CO clock-stretching from ordinary
-   thermal throttling**, and the isolated probe's current draw is lighter than the real
-   AVX-512 load — so it is a degradation *indicator*, not proof of instability.
+   thermal throttling**; the trailing baseline deliberately **absorbs very gradual
+   decline** (it targets abrupt stretch, not slow creep); and the isolated probe's
+   current draw is lighter than the real AVX-512 load — so it is a degradation
+   *indicator*, not proof of instability.
 4. **Reboot-surviving crash breadcrumb** — every second the tool overwrites a tiny
    `lastalive.txt` with the timestamp and the core currently under test. If an
    uncorrectable error reboots the machine instantly, after reboot that file holds
@@ -676,6 +682,7 @@ positives). Newest first:
 
 | Version | What was added | Feedback / reason it exists |
 |---------|----------------|-----------------------------|
+| **v1.9.1** | **Probe robustness:** the random silent-slowdown probe now uses a **fixed warm-up** (always measures at full boost) and a **trailing-window baseline** (median of recent probes) instead of a cold-start baseline. | `--slow-persist 1` (and even 2) reported false `SLOWDOWN`s **on a stable / stock config**: the cold-locked baseline read normal thermal drift as a slowdown, and short warm-up sometimes timed a still-ramping core. The trailing baseline tracks gradual heat (not flagged) and only catches abrupt clock-stretch. Honest trade-off: a very gradual decline is absorbed by design. |
 | **v1.9.0** | **Random-mode silent-slowdown probe**: in `--random`, a fixed-work AVX2-FMA probe runs on the pinned core every ~10 s and flags **clock stretching / throttling** the per-run wall-time check can't see (tunable via `--slow-pct` / `--slow-persist`). | Random/game-like load is where silent slowdown matters most (stutter / FPS drop with no crash), but its wall-time varies by design — so a duty-independent probe was needed. Honest limit: with no temp sensor it **can't separate CO clock-stretch from thermal throttle**. |
 | **v1.8.0** | **Single-test launcher** — run only one chosen y-cruncher test (e.g. `VT3`). | Isolate a specific failure path instead of always running the full battery. |
 | **v1.7.0** | **Total time-limit mode** (`--minutes`): auto-stop cleanly after N minutes (the in-progress run is counted as cancelled, not a fault). | One-click fixed-length soaks (e.g. a 2-hour run) without watching the clock. |

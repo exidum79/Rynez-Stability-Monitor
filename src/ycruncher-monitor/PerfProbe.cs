@@ -17,13 +17,24 @@ namespace Rynez;
 /// HOW: periodically the duty thread suspends the y-cruncher worker (freeing the pinned core), then runs a
 /// FIXED-work AVX2-FMA kernel - the SAME instruction count every time - pinned to the core under test, and
 /// times it. Fixed work means the time depends only on the core's effective throughput (frequency x IPC).
-/// If the core is clock-stretching or throttling, the same work takes measurably longer. We compare each
-/// probe's BEST-of-K timing (min rejects scheduler/interrupt noise, which only ever slows a sample) against
-/// a baseline locked from the first several probes; a sustained slowdown is logged.
+/// If the core is clock-stretching or throttling, the same work takes measurably longer.
+///
+/// Two design points stop the obvious false positives:
+///  - FIXED WARMUP: before timing, the kernel is spun for a fixed ~WarmupMs so the core is ALWAYS ramped to
+///    full single-core boost at the moment we measure - regardless of whether the preceding random phase was
+///    a long idle stretch (cold, low clock) or full load. Without this, a probe right after a long idle would
+///    read "slow" just because the core hadn't boosted yet = a false positive. We then take the BEST-of-K
+///    timing (min rejects scheduler/interrupt noise, which only ever slows a sample).
+///  - TRAILING baseline: each probe is compared to the MEDIAN of the recent probe window (not a value locked
+///    from the cold first runs). This lets the baseline track the slow, normal clock drift as the package
+///    warms over a long run (so steady-state heat is NOT flagged), while an ABRUPT drop - the signature of
+///    clock-stretch kicking in under droop - still stands out for several probes and is logged.
 ///
 /// HONEST LIMITS:
 ///  - It cannot distinguish CO clock-stretching from ordinary THERMAL throttling (no temperature sensor).
 ///    A flagged slowdown means "this core silently lost performance" - could be instability OR just heat.
+///  - The trailing baseline absorbs SLOW, gradual decline by design, so a very gradual degradation can be
+///    missed; it targets abrupt clock-stretch (the game-stutter signature), not a slow creep.
 ///  - The probe runs in ISOLATION (worker suspended) so its di/dt is its own AVX2 load, lighter than
 ///    y-cruncher's full AVX-512 - it may under-trigger a stretch that only the heavier real load causes.
 ///    (Actual wrong-result errors under the real load are still caught by y-cruncher's own self-check.)
@@ -34,9 +45,12 @@ public sealed class PerfProbe
     // needs to be big enough that one call lasts a few ms (well above the ~100ns Stopwatch resolution) and
     // heavy enough to draw real current. 4 independent FMA accumulator chains keep the FP units busy.
     private const int Iter = 4_000_000;
-    private const int Reps = 8;          // back-to-back timed reps per window; sustained load builds droop
-    private const int WarmupReps = 3;    // discard: let the core ramp to boost + warm caches/pipeline first
-    private const int BaselineProbes = 10;   // lock the healthy reference from this many early probes
+    private const int Reps = 8;          // back-to-back timed reps per window; min of these = the sample
+    private const int WarmupMs = 40;     // spin the kernel this long first so the core is ALWAYS at full
+                                         // boost when timed (covers ramp-up after a long idle phase)
+    private const int SkipInitial = 3;   // discard the first few probes (cold ramp, not thermally settled)
+    private const int WindowSize = 24;   // trailing baseline = median of up to this many recent probes (~4 min)
+    private const int MinWindow = 12;    // need this many in the window before we judge anything
 
     // Detection sensitivity (configurable via --slow-pct / --slow-persist). Default: a probe must be >=5%
     // slower than baseline (single-core random load barely heats the package, so thermal drift is small and
@@ -52,8 +66,7 @@ public sealed class PerfProbe
 
     private readonly ErrorLogger _logger;
     private readonly ulong _affinity;
-    private readonly List<double> _early = new();
-    private double _baselineNs = -1;     // set once we have BaselineProbes samples
+    private readonly List<double> _recent = new();   // trailing window of recent best-times (the baseline)
     private int _consecutiveSlow;
     private bool _reported;              // log a sustained slowdown only once per run (no spam)
     private int _probeNo;
@@ -67,7 +80,7 @@ public sealed class PerfProbe
     }
 
     /// <summary>Human-readable summary of the active detection settings (for the startup banner).</summary>
-    public string SettingsDescription => $"flag when >={(_slowFactor - 1) * 100:0.#}% slower than baseline for {_persistRequired} consecutive probes";
+    public string SettingsDescription => $"flag when >={(_slowFactor - 1) * 100:0.#}% slower than recent baseline for {_persistRequired} consecutive probes";
 
     /// <summary>True if the probe can run (we have a single-core affinity to pin to).</summary>
     public bool Enabled => _affinity != 0UL;
@@ -84,7 +97,10 @@ public sealed class PerfProbe
         ulong prev = Native.PinCurrentThread(_affinity);
         try
         {
-            for (int i = 0; i < WarmupReps; i++) Sink = Kernel();
+            // Fixed-duration warm-up: spin until the core has ramped to full single-core boost, so the
+            // timing never catches a still-ramping (post-idle) core and misreads it as "slow".
+            var warmSw = Stopwatch.StartNew();
+            do { Sink = Kernel(); } while (warmSw.ElapsedMilliseconds < WarmupMs);
 
             double bestNs = double.MaxValue;
             for (int i = 0; i < Reps; i++)
@@ -105,40 +121,50 @@ public sealed class PerfProbe
     {
         _probeNo++;
 
-        // Phase 1: characterise the healthy core. Lock the baseline from the MEDIAN of the first several
-        // probes (median ignores both the cold-boost outlier on the fast side and a noisy sample on the
-        // slow side). We don't judge anything until the baseline exists.
-        if (_baselineNs < 0)
+        // Discard the first few probes outright: the core is still on its cold ramp and the package hasn't
+        // thermally settled, so they are not a fair reference.
+        if (_probeNo <= SkipInitial) return;
+
+        // TRAILING baseline: compare this probe to the MEDIAN of the recent window (the "current normal"),
+        // not a value locked from the cold first runs. A slowly-warming core drifts the whole window with it,
+        // so the ratio stays ~1.0 and steady-state heat is NOT flagged; only an ABRUPT drop - a probe jumping
+        // above recent normal, as a clock-stretch onset does - stands out and is counted.
+        if (_recent.Count >= MinWindow)
         {
-            _early.Add(bestNs);
-            if (_early.Count >= BaselineProbes)
+            double median = Median(_recent);
+            double ratio = bestNs / median;
+            if (ratio >= _slowFactor)
             {
-                _early.Sort();
-                _baselineNs = _early[_early.Count / 2];
+                _consecutiveSlow++;
+                if (_consecutiveSlow >= _persistRequired && !_reported)
+                {
+                    _reported = true;
+                    double pct = (ratio - 1) * 100;
+                    string where = pinnedCore >= 0 ? $"core {pinnedCore}" : "core";
+                    _logger.Log("SLOWDOWN", pinnedCore, "", "perf",
+                        $"random probe {bestNs / 1000:F0}us vs recent baseline {median / 1000:F0}us (+{pct:F0}%) on {where} " +
+                        "-> sustained silent slowdown (clock stretching / throttling). Could be marginal CO or just heat.");
+                    Console.WriteLine($"    [SLOWDOWN] {where}: fixed-work probe +{pct:F0}% slower than recent baseline " +
+                                      "-> silent performance drop (clock stretching or thermal throttling).");
+                }
             }
-            return;
+            else
+            {
+                _consecutiveSlow = 0;
+            }
         }
 
-        double ratio = bestNs / _baselineNs;
-        if (ratio >= _slowFactor)
-        {
-            _consecutiveSlow++;
-            if (_consecutiveSlow >= _persistRequired && !_reported)
-            {
-                _reported = true;
-                double pct = (ratio - 1) * 100;
-                string where = pinnedCore >= 0 ? $"core {pinnedCore}" : "core";
-                _logger.Log("SLOWDOWN", pinnedCore, "", "perf",
-                    $"random probe {bestNs / 1000:F0}us vs baseline {_baselineNs / 1000:F0}us (+{pct:F0}%) on {where} " +
-                    "-> sustained silent slowdown (clock stretching / throttling). Could be marginal CO or just heat.");
-                Console.WriteLine($"    [SLOWDOWN] {where}: fixed-work probe +{pct:F0}% slower than baseline " +
-                                  "-> silent performance drop (clock stretching or thermal throttling).");
-            }
-        }
-        else
-        {
-            _consecutiveSlow = 0;
-        }
+        // Slide the trailing window forward (drop the oldest beyond WindowSize).
+        _recent.Add(bestNs);
+        if (_recent.Count > WindowSize) _recent.RemoveAt(0);
+    }
+
+    // Median of the current window (small N, so a sort-and-pick on a copy is fine; never mutates _recent).
+    private static double Median(List<double> xs)
+    {
+        var a = xs.ToArray();
+        Array.Sort(a);
+        return a[a.Length / 2];
     }
 
     // Fixed-work compute kernel. 4 independent FMA chains (acc = acc*m + c). The multipliers are chosen so
