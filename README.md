@@ -248,30 +248,7 @@ blank to sweep all). Same **Balanced** power-plan requirement applies.
    wall-clock time should be near-constant. If a run takes noticeably longer than
    the running average, the machine spent time **not executing** (clock
    stretching / throttling / stalls) — recorded as a `SLOWDOWN` event. No sensors
-   required.
-   In **`--random`** mode wall-time varies by design (the worker is duty-cycled a
-   *random* fraction each run), so that check is replaced by a **fixed-work probe**:
-   every ~10 s it briefly suspends the worker and times a **constant AVX2-FMA kernel**
-   (identical instruction count every time) pinned to the core under test. A short
-   fixed warm-up first guarantees the core is at full boost when timed, and the probe
-   takes the **best of several reps** to reject scheduler noise. Fixed work means the
-   time depends only on the core's effective throughput. Each probe is compared to the
-   **median of the recent probe window** (a *trailing* baseline, not a cold-start one):
-   a slowly-warming core drifts the whole window with it, so **steady-state heat is not
-   flagged**, while an **abrupt** drop — the signature of clock-stretch kicking in under
-   droop — stands out and, if it persists, is logged as a `SLOWDOWN`. This is the most
-   game-relevant signal: real gaming load is bursty like `--random`, and a marginal CO
-   core's failure there is often a silent stutter / FPS drop, not a crash.
-   ⚠️ **Low confidence — treat a `SLOWDOWN` as a hint to investigate, never as a
-   verdict.** With no temperature sensor it **cannot tell CO clock-stretching from
-   ordinary thermal throttling**; the trailing baseline deliberately **absorbs very
-   gradual decline** (it targets abrupt stretch, not slow creep); and the isolated
-   probe's current draw is lighter than the real AVX-512 load. On top of that,
-   **`--random` load is irregular by nature, so a clean baseline is hard to pin down
-   and the probe cannot be precisely calibrated** — on the author's own machine, **even
-   up to 2 consecutive flags turned out to be false positives on a stable / stock
-   config** (which is why the default `--slow-persist 3` is recommended; lower values
-   over-report). Use this signal only as a rough pointer, not proof a core is bad.
+   required. (Skipped in `--random` mode, where wall-time varies by design.)
 4. **Reboot-surviving crash breadcrumb** — every second the tool overwrites a tiny
    `lastalive.txt` with the timestamp and the core currently under test. If an
    uncorrectable error reboots the machine instantly, after reboot that file holds
@@ -554,9 +531,7 @@ in a `dist\` subfolder, so both layouts work.
 | `--transient` | off | Transient / boost-cycling: single-core **plus** duty-cycling the worker (suspend/resume) so the core ramps idle→load repeatedly — exposes CO faults that only show on rapid boost swings. Implies `--single`. ~0.5–2 ms granularity (not sub-ms). |
 | `--burst-ms N` | `5` | Transient load-burst length (ms) — how long the worker runs each cycle. Ignored with `--random`. |
 | `--idle-ms N` | `5` | Transient idle-gap length (ms) — how long the worker is suspended each cycle (lets the core drop its clock). Ignored with `--random`. |
-| `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. Also turns on the fixed-work **silent-slowdown probe** (see detector #3). |
-| `--slow-pct N` | `5` | `--random` silent-slowdown threshold: flag when the probe runs ≥ N% slower than its baseline. Lower = more sensitive but more thermal / boost-variance false positives. |
-| `--slow-persist N` | `3` | Consecutive slow probes (~10 s apart) required before a `SLOWDOWN` is logged. **Keep the default 3** — on the author's machine even `--slow-persist 2` produced false positives on a stable / stock config (random load is hard to baseline cleanly), and `1` fires on a single momentary blip. Lower values over-report; this is a low-confidence, reference-only signal. |
+| `--random` | off | Real-world random load (with `--transient`): random 80–2000 ms phases at random 0–100% target load, so utilisation **wanders the full 0→100% range** like real use instead of a flat metronome band. Sweeps many load levels / idle→boost timings in one run. |
 | `--seconds N` | `120` | Seconds per individual test (internally capped to 60 s/test). One run = a full pass of every test. |
 | `--cycles N` | `0` | Passes (all-core: number of runs; single: number of full sweeps over every core). `0` = infinite. |
 | `--minutes N` | `0` | Total time limit — auto-stop cleanly after N minutes of wall time (`0` = no limit). The in-progress run is ended and counted as **cancelled, not a fault**. Handy for a fixed 2-hour soak. |
@@ -669,9 +644,8 @@ stage catches what the previous one can't. Don't stop early.
    exposes faults that single-core boost never triggers. **Do not skip this:** a
    per-core pass on its own is not a clean bill of health.
 3. **Finally, a random verification.** End with `--transient --random` to validate
-   under real-world **bursty, game-like load** — variable utilisation, idle→boost
-   transients, plus the silent-slowdown probe. This is the closest stage to actual
-   use.
+   under real-world **bursty, game-like load** — variable utilisation and idle→boost
+   transients. This is the closest stage to actual use.
 
 A short **FAIL** at any stage is conclusive — that core is unstable, done. A short
 **PASS** is not: trust a stage only after **hours** of clean run (see
@@ -687,11 +661,10 @@ positives). Newest first:
 
 | Version | What was added | Feedback / reason it exists |
 |---------|----------------|-----------------------------|
-| **v1.9.1** | **Probe robustness:** the random silent-slowdown probe now uses a **fixed warm-up** (always measures at full boost) and a **trailing-window baseline** (median of recent probes) instead of a cold-start baseline. | `--slow-persist 1` (and even 2) reported false `SLOWDOWN`s **on a stable / stock config**: the cold-locked baseline read normal thermal drift as a slowdown, and short warm-up sometimes timed a still-ramping core. The trailing baseline tracks gradual heat (not flagged) and only catches abrupt clock-stretch. Honest trade-off: a very gradual decline is absorbed by design. |
-| **v1.9.0** | **Random-mode silent-slowdown probe**: in `--random`, a fixed-work AVX2-FMA probe runs on the pinned core every ~10 s and flags **clock stretching / throttling** the per-run wall-time check can't see (tunable via `--slow-pct` / `--slow-persist`). | Random/game-like load is where silent slowdown matters most (stutter / FPS drop with no crash), but its wall-time varies by design — so a duty-independent probe was needed. Honest limit: with no temp sensor it **can't separate CO clock-stretch from thermal throttle**. |
+| **v1.9.2** | **Removed** the experimental random-mode silent-slowdown probe (it shipped briefly in v1.9.0–v1.9.1). | The probe reported false `SLOWDOWN`s **even on a stable / stock config**, through every tuning attempt. Without a temperature/clock sensor the approach **cannot reliably separate a real clock-stretch from ordinary thermal / boost-clock variance** under irregular `--random` load — so it was pulled rather than ship an untrustworthy signal. |
 | **v1.8.0** | **Single-test launcher** — run only one chosen y-cruncher test (e.g. `VT3`). | Isolate a specific failure path instead of always running the full battery. |
 | **v1.7.0** | **Total time-limit mode** (`--minutes`): auto-stop cleanly after N minutes (the in-progress run is counted as cancelled, not a fault). | One-click fixed-length soaks (e.g. a 2-hour run) without watching the clock. |
-| **v1.6.1** | **Fix:** skip the silent-slowdown check in `--random` mode. | Random duty-cycling makes wall-time vary by design, so the per-run check fired **false** performance-drop events. (v1.9.0 later adds a proper duty-independent probe.) |
+| **v1.6.1** | **Fix:** skip the silent-slowdown check in `--random` mode. | Random duty-cycling makes wall-time vary by design, so the per-run check fired **false** performance-drop events. |
 | **v1.6.0** | **Real-world random transient mode** (`--random`): random 80–2000 ms phases at random 0–100 % load, so utilisation **wanders the full 0→100 % range** like real use. | A fixed metronome holds one average load; real workloads don't. This sweeps many load levels / idle→boost timings in one run. |
 | **v1.5.0** | **Transient launchers** (boost-cycling + max-shake). | One-click access to the new transient mode without typing flags. |
 | **v1.4.0** | **Transient / boost-cycling mode** (`--transient`): pins one core *and* duty-cycles the worker (suspend/resume) so it ramps **idle→load repeatedly**, exposing CO faults that only show on rapid boost swings. | *"A steady 100% load won't find low-load / transient instability."* Correct — so this targets the transient regime directly. Honest about the limit: Windows timing is ~0.5–2 ms (**not** sub-ms), so it's a **complement** to the steady runs, not a Linux sub-ms tool. |

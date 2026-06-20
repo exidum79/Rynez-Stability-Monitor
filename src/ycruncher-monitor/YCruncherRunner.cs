@@ -77,10 +77,10 @@ public sealed class YCruncherRunner
     /// NOTE: Windows timer granularity is ~0.5-2ms, NOT sub-ms - this approximates transient stress; it
     /// does not match a Linux sub-ms tool. It surfaces more transient exposure than steady load, no more.
     /// </summary>
-    public YcResult RunTransient(ulong affinityMask, int durationSeconds, int burstMs, int idleMs, bool randomDuty, CancellationToken token, int pinnedCore = -1, double slowPct = 5.0, int slowPersist = 3)
-        => Run(durationSeconds, affinityMask, token, Math.Max(1, burstMs), Math.Max(1, idleMs), randomDuty, pinnedCore, slowPct, slowPersist);
+    public YcResult RunTransient(ulong affinityMask, int durationSeconds, int burstMs, int idleMs, bool randomDuty, CancellationToken token)
+        => Run(durationSeconds, affinityMask, token, Math.Max(1, burstMs), Math.Max(1, idleMs), randomDuty);
 
-    private YcResult Run(int durationSeconds, ulong affinityMask, CancellationToken token, int burstMs = 0, int idleMs = 0, bool randomDuty = false, int pinnedCore = -1, double slowPct = 5.0, int slowPersist = 3)
+    private YcResult Run(int durationSeconds, ulong affinityMask, CancellationToken token, int burstMs = 0, int idleMs = 0, bool randomDuty = false)
     {
         string exe = DefaultExePath();
         if (!File.Exists(exe)) return new(YcOutcome.NotFound, "y-cruncher.exe not found in tools\\", -1);
@@ -130,7 +130,7 @@ public sealed class YCruncherRunner
         Thread? dutyThread = null;
         if (burstMs > 0)
         {
-            dutyThread = new Thread(() => DutyCycleWorker(proc, burstMs, idleMs, randomDuty, token, pinnedCore, affinityMask, slowPct, slowPersist))
+            dutyThread = new Thread(() => DutyCycleWorker(proc, burstMs, idleMs, randomDuty, token))
             { IsBackground = true, Priority = ThreadPriority.Highest, Name = "transient-duty" };
             dutyThread.Start();
         }
@@ -177,7 +177,7 @@ public sealed class YCruncherRunner
     // for burstMs (core ramps to boost), suspend it for idleMs (core drops clock), repeat. Pinned to one
     // core, this produces the rapid boost swings a steady 100% load never does. y-cruncher's self-check is
     // untouched - suspend/resume is transparent to it - so a silent compute error is still detected.
-    private void DutyCycleWorker(Process launcher, int burstMs, int idleMs, bool randomDuty, CancellationToken token, int pinnedCore = -1, ulong affinityMask = 0UL, double slowPct = 5.0, int slowPersist = 3)
+    private void DutyCycleWorker(Process launcher, int burstMs, int idleMs, bool randomDuty, CancellationToken token)
     {
         Process? worker = FindWorkerChild(token);
         if (worker == null)
@@ -216,14 +216,6 @@ public sealed class YCruncherRunner
                 // full 0->100% range like real use: idle stretches (clock fully drops), full-load stretches,
                 // and partial stretches with fast idle->boost edges. burstMs/idleMs are ignored in this mode.
                 const int phaseMinMs = 80, phaseMaxMs = 2000, periodMs = 10;
-                // Silent-slowdown probe: between phases (every ~probeIntervalMs) suspend the worker and run a
-                // fixed-work kernel on this core to catch clock stretching / throttling that the per-run
-                // wall-time check can't see in random mode. Only active when pinned to one core.
-                const long probeIntervalMs = 10_000;
-                var probe = new PerfProbe(_logger, affinityMask, slowPct, slowPersist);
-                if (probe.Enabled)
-                    Console.WriteLine($"      [perf-probe] random silent-slowdown detection ON (every ~10s; {probe.SettingsDescription}).");
-                var probeSw = Stopwatch.StartNew();
                 var phaseSw = new Stopwatch();
                 while (Running())
                 {
@@ -252,16 +244,6 @@ public sealed class YCruncherRunner
                             Thread.Sleep(idle);
                             Native.ResumeProcess(h);
                         }
-                    }
-
-                    // At a phase boundary the worker is resumed (running); take a clean probe by freezing it
-                    // for the measurement, then resume so the random load continues.
-                    if (probe.Enabled && probeSw.ElapsedMilliseconds >= probeIntervalMs && Running())
-                    {
-                        Native.SuspendProcess(h);
-                        probe.Measure(pinnedCore);
-                        Native.ResumeProcess(h);
-                        probeSw.Restart();
                     }
                 }
             }
