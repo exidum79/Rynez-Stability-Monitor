@@ -196,23 +196,18 @@ caught; you just also get the boost-swing stress a steady load can't produce.
 Tune the duty cycle with `--burst-ms` / `--idle-ms` (defaults `5` / `5`). Lower values pack
 in more idle→load swings per second but get jittery as they approach the timer floor; the
 idle gap should stay long enough (a few ms) for the core to actually drop its clock between
-bursts. Launch it with **`core-cycler (transient boost).bat`**.
+bursts (this fixed metronome is available via the exe's `--burst-ms` / `--idle-ms` flags).
 
 > **Needs the Balanced power plan.** The swing only develops if the clock is *allowed to
 > drop* during the idle gap. On **High performance** (or any plan with **Minimum processor
 > state = 100%**) the core stays pinned near its ceiling, so the suspend/resume cycles do
 > almost nothing — there is no idle→boost transition left to stress. Use **Balanced** with
 > **Minimum processor state ≈ 5%** so the clock falls in the idle gap and gets yanked back
-> to full boost on each burst. This matters most for the **max-shake** launcher below.
+> to full boost on each burst. This applies to all the transient (`random`) launchers.
 
-For a one-click setup there are two **core-0** transient launchers (no editing needed):
-**`core-cycler (core0 transient).bat`** (default `5/5` duty, pinned to core 0) and
-**`core-cycler (core0 max-shake).bat`** (`2/3` duty — the idle gap is long enough for the
-clock+voltage to genuinely drop, then the short burst yanks it to full boost, giving the
-**deepest idle→full-boost swing** that pops CO undervolts). Both require the **Balanced**
-plan above to do anything; going below ~1–2 ms is pointless (Windows `Sleep` floors at
-~1 ms and the clock/voltage ramp itself takes ~1–2 ms, so shorter just blurs into a
-mid-clock instead of a full swing).
+For a one-click setup the shipped launchers use the **`--random`** real-world variant
+(below) instead of a fixed metronome — there is one **`core<N> random (2h).bat`** per core
+(`0`–`5`), each pinned and ready to run with no editing.
 
 #### Real-world random mode (`--random`)
 
@@ -227,9 +222,9 @@ stretches, and partial stretches with fast idle→boost edges. As a bonus, a pha
 from a ~0 % idle stretch straight into a ~100 % stretch is the **deepest possible
 idle→full-load step**, the hardest Vmin transient of all. It exercises CO faults across many
 load levels and transition timings in a single run rather than betting on one fixed swing
-(`--burst-ms` / `--idle-ms` are ignored in this mode). Launch it with
-**`core-cycler (transient random).bat`** (edit `CORES` to target specific cores, or leave it
-blank to sweep all). Same **Balanced** power-plan requirement applies.
+(`--burst-ms` / `--idle-ms` are ignored in this mode). The shipped
+**`core<N> random (2h).bat`** launchers run exactly this — one per core (`0`–`5`), no
+editing. Same **Balanced** power-plan requirement applies.
 
 ### The detectors
 
@@ -381,14 +376,9 @@ test:
    ```
    Rynez-Stability-Monitor\
      ycruncher-monitor.exe
-     y-cruncher-monitor (all-core).bat
-     core-cycler (single-core).bat
-     core-cycler (pick cores).bat
-     core-cycler (transient boost).bat
-     core-cycler (core0 transient).bat
-     core-cycler (core0 max-shake).bat
-     core-cycler (transient random).bat
-     core-cycler (single test).bat
+     allcore 100 (2h).bat                 <- all cores, 100% sustained, 2 h
+     core0 pick 100 (2h).bat  ...  core5  <- pin core N, 100% sustained, 2 h
+     core0 random (2h).bat    ...  core5  <- pin core N, transient (random boost-cycling)
      mem-test (RAM-IMC).bat
      full-test (RAM-IMC + CPU-CO).bat
      tools\            <- put y-cruncher here
@@ -409,7 +399,7 @@ test:
    > (Don't worry if `y-cruncher.exe` shows **0%** in Task Manager later — that's normal,
    > the busy process is the `…Binaries\… .exe` child.)
 3. **Run** a launcher (it auto-requests Administrator), e.g. double-click
-   `core-cycler (single-core).bat`. A correct setup prints `y-cruncher.exe + Binaries\ found.`
+   `core0 pick 100 (2h).bat`. A correct setup prints `y-cruncher.exe + Binaries\ found.`
 
 The release exe is **self-contained** — no .NET install is required to run it.
 
@@ -457,42 +447,20 @@ For a no-runtime-needed build, add `--self-contained true` (larger output).
 
 The easiest way is the batch files (they auto-request Administrator):
 
-- **`y-cruncher-monitor (all-core).bat`** — all-core diagnosis.
-- **`core-cycler (single-core).bat`** — single-core (high-boost) diagnosis, sweeps every core.
-- **`core-cycler (pick cores).bat`** — single-core on **only the core(s) you choose**.
-  Open it in Notepad and edit one line near the top:
-  ```bat
-  set "CORES=0"        rem one core
-  set "CORES=0,2,5"    rem several cores (comma, no spaces)
-  set "CORES="         rem blank = sweep every core
-  ```
-  Use this to **soak one suspect core continuously** (e.g. the core that failed
-  before) instead of splitting the night across all cores.
-- **`core-cycler (transient boost).bat`** — **transient / boost-cycling** single-core:
-  duty-cycles the pinned worker so the core ramps **idle→load repeatedly**, exposing CO
-  faults that only show on rapid boost swings (steady load misses them). Edit `BURST` /
-  `IDLE` (ms) and optionally `CORES` at the top. **Honest limit:** Windows timing is
-  ~0.5–2 ms (not sub-ms) — a complement to the steady runs, not a sub-ms tester (see
-  [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
-- **`core-cycler (core0 transient).bat`** — the same transient mode **hard-pinned to core 0**
-  (default `5/5` duty), so you can soak core 0 with no editing.
-- **`core-cycler (core0 max-shake).bat`** — core 0 transient tuned for the **biggest clock
-  swing** (`2/3` duty: the deepest idle→full-boost transition, the one that pops CO
-  undervolts). ⚠️ **Only works on the Balanced power plan** (Minimum processor state ≈ 5%);
-  on High performance / min-state 100% the clock never drops in the idle gap, so there is no
-  swing to stress (see [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
-- **`core-cycler (transient random).bat`** — **real-world random** transient: random
-  80–2000 ms phases at random 0–100% load, so the core's utilisation **wanders the full
-  0→100% range like real use** (not a flat metronome band) and hits many load levels /
-  transition timings in one run. Edit `CORES` at the top (blank = sweep all). Same Balanced
-  plan requirement (see [Real-world random mode](#real-world-random-mode---random)).
-- **`core-cycler (single test).bat`** — runs **only the y-cruncher test(s) you pick**
-  (default **VT3**), single-core. Use it when your CPU **crashes reliably on one test** and
-  you want to skip the rest for faster reproduction. Edit `TESTS` (e.g. `VT3`, or `VT3 N63`)
-  and `CORES` at the top. The ~15 s progress tick shows which test is running.
+One file per job — no editing, just double-click the one you want (each
+auto-stops after 2 h):
+
+- **`allcore 100 (2h).bat`** — all-core diagnosis, 100% sustained.
+- **`core<N> pick 100 (2h).bat`** (`<N>` = `0`–`5`) — pin **core N**, 100% sustained
+  single-core (high-boost) soak. Run the core you suspect; no flags to edit.
+- **`core<N> random (2h).bat`** (`<N>` = `0`–`5`) — pin **core N**, **real-world
+  random transient**: random 80–2000 ms phases at random 0–100% load, so the core's
+  utilisation **wanders the full 0→100% range like real use** and hits many boost
+  swings / load levels in one run — exposing CO faults that steady load misses.
+  ⚠️ **Needs the Balanced power plan** (Minimum processor state ≈ 5%) so the clock can
+  actually drop in the idle gaps (see [Transient / boost-cycling mode](#transient--boost-cycling-mode)).
 - **`mem-test (RAM-IMC).bat`** — **RAM / IMC only**: all-core, memory-coupled tests
-  with a large memory footprint, looping. Edit `MEM` at the top to most of your free
-  RAM for the heaviest memory stress. WHEA tags a memory fault `RAM/IMC`. (Still pair
+  with a large memory footprint, looping. WHEA tags a memory fault `RAM/IMC`. (Still pair
   with TM5 / Karhu / MemTest86 — y-cruncher is not a dedicated memory tester.)
 - **`full-test (RAM-IMC + CPU-CO).bat`** — the **full battery** in one go:
   Phase 1 all-core memory-coupled load (**RAM / IMC** + load vdroop), then Phase 2
@@ -611,7 +579,7 @@ at a time, so an overnight sweep gives each core only about `total ÷ core count
 of cumulative high-boost time (e.g. 8 h on a 6-core ≈ 80 min per core, in
 rotating bursts). That rotation is the accepted CoreCycler-style method and adds
 useful boost/idle thermal cycling — but to give **one** core a true continuous
-soak, use `--core N` (or `core-cycler (pick cores).bat`) and let just that core
+soak, use `--core N` (or `core0 pick 100 (2h).bat`) and let just that core
 run all night. The complementary **all-core** run instead soaks **every** core
 the whole time, in the low-frequency / high-current corner.
 
@@ -633,9 +601,10 @@ stage catches what the previous one can't. Don't stop early.
 1. **Per-core first, at single-core 100% boost.** Pin one core at a time so it
    boosts to its **single-core ceiling**, where high-boost / light-load CO faults
    surface fastest. Two ways:
-   - **Targeted:** `--core N` (or `core-cycler (pick cores).bat`) soaks one specific
+   - **Targeted:** `--core N` (or `core0 pick 100 (2h).bat`) soaks one specific
      suspect core continuously — the fastest route to a verdict on that core.
-   - **Sweep:** plain `--single` (or `core-cycler`) rotates through **every** core.
+   - **Sweep:** plain `--single` rotates through **every** core (or run the per-core
+     `core<N> pick 100 (2h).bat` launchers one at a time).
      More thorough, but it **divides your time across cores, so it takes longer**
      to give each core meaningful soak time.
 2. **Then always run an all-core verification.** Once the per-core stage looks
@@ -661,6 +630,7 @@ positives). Newest first:
 
 | Version | What was added | Feedback / reason it exists |
 |---------|----------------|-----------------------------|
+| **v2.0.0** | **Unified one-click launchers** — one fixed file per core: `core<N> pick 100 (2h).bat` (100% sustained) and `core<N> random (2h).bat` (transient), plus `allcore 100 (2h)`, `mem-test`, `full-test`. Removed the legacy editable `core-cycler (*)` launchers. | No flags or variables to edit — just run the launcher for the core/mode you want. |
 | **v1.9.2** | **Removed** the experimental random-mode silent-slowdown probe (it shipped briefly in v1.9.0–v1.9.1). | The probe reported false `SLOWDOWN`s **even on a stable / stock config**, through every tuning attempt. Without a temperature/clock sensor the approach **cannot reliably separate a real clock-stretch from ordinary thermal / boost-clock variance** under irregular `--random` load — so it was pulled rather than ship an untrustworthy signal. |
 | **v1.8.0** | **Single-test launcher** — run only one chosen y-cruncher test (e.g. `VT3`). | Isolate a specific failure path instead of always running the full battery. |
 | **v1.7.0** | **Total time-limit mode** (`--minutes`): auto-stop cleanly after N minutes (the in-progress run is counted as cancelled, not a fault). | One-click fixed-length soaks (e.g. a 2-hour run) without watching the clock. |
